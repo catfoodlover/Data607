@@ -1,0 +1,89 @@
+---
+title: "Data607 HW1"
+author: "William Aiken"
+date: "8/29/2021"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(readr)  
+library(knitr)
+library(reshape2)
+library(kableExtra)
+library(gtsummary)
+```
+
+```{r, include=FALSE}
+options(tinytex.verbose = TRUE)
+```
+
+## Overview
+### This is a further exploration of the halloween candy dataset taken from the *fivethirtyeight* article "The Ultimate Halloween Candy Power Ranking"
+[link to The Ulitmate Halloween Candy Power Ranking](https://fivethirtyeight.com/videos/the-ultimate-halloween-candy-power-ranking/)
+
+### In this article they explored the desirabiltiy of 85 common Halloween treats
+#### They focused on properties of the treats to see if they could identify what made them desirable
+* Chocolate
+* Fruity
+* Caramel
+* Nuts
+* Nougat
+* Crispy
+* Hard
+
+```{r}
+#Read in the data
+file_path <- "https://raw.githubusercontent.com/catfoodlover/Data607/main/Data607_HW1_Data_WilliamAiken.csv"
+
+candy_df <- read_csv(file_path, show_col_types = FALSE)
+
+#Select columns of interest and fix names when necessary
+candy_df <- candy_df %>% select(names = competitorname, choco = chocolate, fruity, caramel, nuts = peanutyalmondy, nougat, crispy = crispedricewafer, win_percent = winpercent)
+
+#Character needs to be fixed
+candy_df$names <- gsub( "Õ", "'", candy_df$names)
+
+#Convert dataset from wide to long to make it easier to work with
+temp <- melt(data = candy_df, id.vars = "names", measure.vars = c("choco", "fruity", "caramel", "nuts", "nougat", "crispy"), variable.name = "Property", value.name = "Status")
+
+#Join win percentage back in
+temp2 <- left_join(temp, candy_df %>% select(names, win_percent), by = "names")
+```
+
+### What is the mean win percentage of all properties?
+* People like texture, nuts and crispy are stand outs both those are both properties that tend to go with chocolate the 3rd place property.
+```{r}
+temp2 %>% filter(Status == 1) %>% select(Property, win_percent) %>% tbl_summary(by = Property, 
+  statistic = list(all_continuous() ~ "{mean} ({sd})"),
+digits = all_continuous() ~ 1,
+label = win_percent ~ "% Winner")
+
+```
+
+
+### what are the properties of the top bottom candies?
+* Looks like people love chocolate.
+```{r}
+candy_df %>% arrange(desc(win_percent)) %>% slice_head(n = 10) %>% 
+  count(choco, fruity, caramel, nuts, nougat, crispy) %>% kable() %>% kable_styling()
+```
+
+### What are the properties of the bottom ten treats?
+* There a less clear message.  Fruity isn't popular but more importantly none of these are chocolate.
+```{r}
+candy_df %>% arrange(desc(win_percent)) %>% slice_tail(n = 10) %>% 
+  count(choco, fruity, caramel, nuts, nougat, crispy) %>% kable() %>% kable_styling()
+```
+
+#Conclusion
+* It looks like the sterotypes are true, people love chocolate.
+
+##Future questions:
+* Are people drawn to novelty?  Does how long a product been on the market predict a winning treat.
+* Do certain combinatations of properties spell trouble or success?
+
+
