@@ -1,0 +1,228 @@
+---
+title: "Data607_HW2_WilliamAiken"
+author: "William Aiken"
+date: "9/5/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(readr)  
+library(knitr)
+library(reshape2)
+library(kableExtra)
+library(gtsummary)
+library(RPostgreSQL)
+library(keyring)
+```
+
+# Overview
+### Five participants were asked to complete a survey reporting their feelings about six recent movies:
+* _Ghost_
+* _Home Alone_
+* _Pretty Woman_
+* _Teenage Mutant Ninja Turtles_
+* _The Hunt for Red October_
+* _Total Recall_
+
+#### I forgot to mention that it's 1990 and these were the top six grossing movies of the year.
+
+# Methods
+### 1. Participants were sent a Google survey via email
+[Link to sample survey](https://docs.google.com/forms/d/e/1FAIpQLSfgyfpmQbOKtd9w1wI2mNLKhL9AbSPZiNcPI9gqKdgVb5T-Lw/viewform?usp=pp_url&entry.626631247=Disagree&entry.570526891=__other_option__&entry.570526891.other_option_response=Never+saw+it&entry.1654691276=Strongly+agree&entry.157290488=Neutral&entry.2111742020=Agree&entry.1093550225=Strongly+agree)
+
+#### Answers were on a 5 point Likert scale.  Questions could also be answered 'Other' or left blank.
+* Strongly Agree
+* Agree
+* Neutral
+* Disagree
+* Strongly Disagree
+
+### 2. Results were uploaded as a csv to Github
+[Link to dataset](https://raw.githubusercontent.com/catfoodlover/Data607/main/Data607_HW2_Data_WilliamAiken.csv)
+```{r}
+#Create file path of data in github
+file_path <- "https://raw.githubusercontent.com/catfoodlover/Data607/main/Data607_HW2_Data_WilliamAiken.csv"
+```
+
+
+### 3. Created an account on bit.io, a free site for hosting SQL databases
+[Link to bit.io](https://bit.io/catfoodlover/demo_repo)
+
+### 4. Data was pulled from Github into R for processing
+```{r}
+#Read in data
+movie_df <- read_csv(file_path, show_col_types = FALSE)
+
+#Rename columns
+names(movie_df) <- c("Timestamp", "Ghost", "Pretty_Woman", "Home_Alone", "TMNT", "THFRO", "Total_Recall")
+
+#Add ID column and drop the time stamp
+movie_df <- movie_df %>% mutate(USERID = row_number()) %>% select(-c("Timestamp"))
+
+#Reshape from wide to long to make it easier to normalize the data
+temp <- melt(data = movie_df, id.vars = "USERID", measure.vars = c("Ghost", "Pretty_Woman", "Home_Alone", "TMNT", "THFRO", "Total_Recall"))
+
+temp <- temp %>% mutate(value = ifelse(value %in% c("Strongly agree","Agree","Neutral","Strongly disagree", "Disagree"), value, 'NULL'))
+
+temp$variable <- as.character(temp$variable)
+
+temp <-
+  temp %>% mutate(
+    variable = case_when(
+      variable == "Pretty_Woman" ~ "Pretty Woman",
+      variable == "Home_Alone" ~ "Home Alone",
+      variable == "TMNT" ~ "Teenage Mutatant Ninja Turtles",
+      variable == "THFRO" ~ "The Hunt for Red October",
+      variable == "Total_Recall" ~ "Total Recall",
+      TRUE ~ variable))
+      
+
+#check to make sure we have a row for every respondent and movie
+temp %>% group_by(variable) %>% count(value) %>% View()
+
+#create ids for movie and response
+temp$movieID<- temp %>% group_indices(variable)
+temp$responseID<- temp %>% group_indices(value)
+```
+
+### 5. Data was reshaped and split into 3 sub tables for data normalization
+```{r}
+#create movie table
+movies <- temp %>% select(movieID, movie_name = variable) %>% distinct()
+
+#create response table
+responses <- temp %>% select(responseID, value) %>% distinct()
+
+#create main table
+main_tlb <- temp %>% select(USERID, movieID, responseID) %>% distinct()
+```
+
+### 6.  Tables were loaded to bit.io as postgres SQL statement
+```{r}
+#get my password for bit.i
+password <- key_get("bit.io", "catfoodlover_demo_db_connection")
+
+#connect to bit.io
+con <- dbConnect(RPostgreSQL::PostgreSQL(), dbname = 'bitdotio', 
+                 host = 'db.bit.io',
+                 port = 5432,
+                 user = 'bitdotio',
+                 password = password)
+
+
+#Create movies table
+DBI::dbSendQuery(con, 'CREATE TABLE IF NOT EXISTS "catfoodlover/demo_repo"."movies" (
+  movieID INTEGER,
+  movie_name TEXT
+)')
+
+#Insert data into table
+DBI::dbSendQuery(
+  con,
+  'INSERT INTO "catfoodlover/demo_repo"."movies" VALUES (1,\'Ghost\'), (3, \'Pretty Woman\'), (2, \'Home Alone\'), (4, \'Teenage Mutatant Ninja Turtles\'), (5, \'The Hunt for Red October\'), (6, \'Total Recall\');'
+)
+
+#Create response table
+DBI::dbSendQuery(
+  con,
+  'CREATE TABLE IF NOT EXISTS "catfoodlover/demo_repo"."responses" (
+  responseID INTEGER,
+  value TEXT
+)'
+)
+
+#Insert data into table
+DBI::dbSendQuery(
+  con,
+  'INSERT INTO "catfoodlover/demo_repo"."responses" VALUES (1,\'Agree\'), (2, \'Disagree\'), (3, \'Neutral\'), (4, \'NULL\'), (5, \'Strongly agree\');'
+)
+
+#Create main table
+DBI::dbSendQuery(
+  con,
+  'CREATE TABLE IF NOT EXISTS "catfoodlover/demo_repo"."main" (
+  USERID INTEGER,
+  movieID INTEGER,
+  responseID INTEGER
+)'
+)
+
+DBI::dbSendQuery(
+  con,
+  'INSERT INTO "catfoodlover/demo_repo"."main" VALUES
+(1,1,1),
+(2,1,1),
+(3,1,1),
+(4,1,2),
+(5,1,3),
+(1,3,3),
+(2,3,4),
+(3,3,5),
+(4,3,1),
+(5,3,5),
+(1,2,5),
+(2,2,1),
+(3,2,2),
+(4,2,1),
+(5,2,5),
+(1,4,5),
+(2,4,1),
+(3,4,3),
+(4,4,4),
+(5,4,1),
+(1,5,4),
+(2,5,4),
+(3,5,5),
+(4,5,2),
+(5,5,4),
+(1,6,5),
+(2,6,1),
+(3,6,1),
+(4,6,1),
+(5,6,4);')
+
+
+```
+
+### 7.  Data was rejoined and pulled from bit.io
+```{r}
+d <- dbSendQuery(con, 'SELECT * FROM "catfoodlover/demo_repo"."main" AS main
+                       LEFT JOIN "catfoodlover/demo_repo"."movies" AS movies
+                       ON main.movieID = movies.movieID
+                       LEFT JOIN "catfoodlover/demo_repo"."responses"  AS response
+                       ON main.responseID = response.responseID;')
+
+data <- fetch(d)
+
+
+
+```
+### 8.  Tables were dropped
+```{r}
+#drop my tables
+dbSendQuery(con, 'DROP TABLE "catfoodlover/demo_repo"."main";')
+dbSendQuery(con, 'DROP TABLE "catfoodlover/demo_repo"."movies";')
+dbSendQuery(con, 'DROP TABLE "catfoodlover/demo_repo"."responses";')
+```
+
+### 9. Data is summarised
+```{r}
+data$value[data$value == 'NULL'] <- NA
+
+data %>% select(movie_name, value) %>% mutate(value = factor(value, c("Strongly agree", "Agree", "Neutral", "Disagree", "Strongly Disagree"))) %>% tbl_summary(by = movie_name)
+
+```
+# Conclusions
+* Google surveys are a pretty easy way to collect survey data
+* bit.io looks like a cool place to store SQL data bases (Their tutorials could use more examples)
+* _Pretty Woman_ fans still feel very strongly about it, with the largest percentage of participants giving it a 5.
+* _Total Recall_ has stood the test of time best out of these six blockbusters, this had the highest percentage of 4+ scores.
+* People need to go back and watch Hunt for Red October, not enough people have seen this.  This movie had the most missing values.
+
+
+
+
+
+
