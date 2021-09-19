@@ -1,0 +1,279 @@
+---
+title: "Chess Tournament Data Wrangling"
+author: "William Aiken"
+date: "9/19/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+library(readr)  
+library(knitr)
+library(reshape2)
+library(kableExtra)
+library(gtsummary)
+library(RPostgreSQL)
+library(keyring)
+library(readr)
+library(tidyverse)
+library(reshape2)
+```
+
+# Introduction
+### We given a chess tournament data set as a text file and our goal is to convert this into a data structure containing the following elements:
+
+* Player’s Name
+* Player’s State
+* Total Number of Points
+* Player’s Pre-Rating
+* Average Pre Chess Rating of Opponents
+
+# Method
+### First we import the text file which we have saved on Github and convert it to data frame
+* We are using the 'readLines' funtion to import the text file, the parameter '-1' tells the function to read the entire file
+* We then cast it as a data frame which gives us one column with all the data in it (We have some work to do).
+* We use the 'separate' function from the 'tidyr' package to attemp to split the text into columns.  We are using the pipe as our delimiter.
+
+```{r}
+file_path <- "https://raw.githubusercontent.com/catfoodlover/Data607/main/tournamentinfo.txt"
+
+chess_df <- readLines(file_path, n = -1)
+
+chess_df <- as.data.frame(chess_df)
+
+step <-
+  tidyr::separate(
+    data = chess_df,
+    col = chess_df,
+    into = c(
+      "Pair_Num",
+      "Player_Name",
+      "Total_Pts",
+      "Round_1",
+      "Round_2",
+      "Round_3",
+      "Round_4",
+      "Round_5",
+      "Round_6",
+      "Round_7"
+    ),
+    sep = "\\|",
+  ) 
+
+temp <- head(step)
+
+kableExtra::kable(temp)
+```
+
+### We can see that this data set is going to require some work to get it to the final form of one event per row with aggregated opponent scores
+
+* First we remove the rows without information with a simple filter statement
+* We then split the data set into two data sets because each row contains two rows of information
+* We create a flag called 'split' by casting 'Pair_Num' as numeric and filtering on whether it is missing or not
+
+```{r}
+step2 <- step %>% filter(!is.na(Player_Name))
+
+step3 <- step2 %>% mutate(split = as.numeric(Pair_Num)) %>% filter(!is.na(split) == TRUE)
+
+step4 <- step2 %>% mutate(split = as.numeric(Pair_Num)) %>% filter(is.na(split) == TRUE)
+
+temp <- head(step3)
+temp2 <- head(step4)
+kableExtra::kable(temp)
+kableExtra::kable(temp2)
+```
+
+### We now have two data frames, one with the player names, points, and record and a second data frame with player location and pre/post ranking
+* Working the 2nd data frame, we split the column 'Player_Name into 'USCF_ID' and 'Pre_Post'
+* We split "Pre_Post' again into to separate columns using '->' as our delimiter
+* We use the 'gsub' function to clean up the rankings so they can later be cast as numeric
+* We are also selecting off unused columns and rows
+* Lastly we join this data frame back to the original data frame to get each players pre-tournament score associated with their 'Pair_Num'
+```{r}
+step5 <- step4 %>% separate(col = Player_Name, into = c("USCF_ID", "Pre_Post"), sep = "\\/") 
+
+step6 <- step5 %>% separate(col = Pre_Post, into = c("Pre", "Post"), sep = "\\-\\>")
+
+step7 <- step6 %>% mutate(Pre = gsub("R\\: ", "", Pre), Pre = gsub("P.*", "", Pre), Post = gsub("P.*", "", Post)) %>% select(Pair_Num, USCF_ID, Pre, Post)
+
+step10 <- step7 %>% select(Location = Pair_Num, USCF_ID, Pre, Post) %>% filter(!is.na(Post), Post != "")
+
+step11 <- bind_cols(step3, step10) %>% select(Pair_Num, Pre) %>% mutate(Pair_Num = str_trim(Pair_Num))
+
+temp <- head(step10)
+kableExtra::kable(temp)
+```
+
+### We turn our attention back to the first data set and convert it from wide to long for ease of calculations
+
+* We use the 'melt' function to create one row per tournament round per player
+* We use 'seperate' to split the the round results from the opponent 'Pair Number'
+* We left join our opponent's pre-tournament ranking we created in the last code block
+* Now we can filter on meaningful round results (Win, Lose, Draw) and group by player and find the average ranking of their opponents
+* It's important to note that this gives us meaningful results for both players who played every round and players who had non-game rounds
+* We create a temporary table to join player location into our final dataset by 'Pair Num'
+* We trim unnecessary spaces from character strings to allow for more accurate joining
+
+```{r}
+
+step8 <- melt(data = step3, id.vars = "Player_Name", measure.vars = c("Round_1","Round_2","Round_3","Round_4","Round_5","Round_6","Round_7"))
+
+step9 <- step8 %>% separate(col = value, into = c("Result", "Opponent"), sep = "  ") %>% mutate(Opponent = str_trim(Opponent), Result = str_trim(Result))
+
+step12 <- left_join(step9, step11, by = c("Opponent" = "Pair_Num"))
+
+step13 <-
+  step12 %>% filter(Result %in% c("W", "L", "D")) %>% group_by(Player_Name) %>% mutate(avg_opp = round(sum(as.numeric(Pre)) /
+                                                                                                         n())) %>% ungroup()
+
+step14 <- bind_cols(step3, step10) %>% select(Pair_Num, Location) %>% mutate(Pair_Num = str_trim(Pair_Num))
+
+
+step15 <- step3 %>% mutate(Pair_Num = str_trim(Pair_Num,), Player_Name = str_trim(Player_Name)) %>% select(Pair_Num, Player_Name, Total_Pts)
+```
+
+### Now we can put all the pieces together to create a final data frame to be uploaded into a database
+
+*  We take our calculated opponent averages and split them off into a temporary table, with 'Player_Name' as the key
+* We join all the required fields together, using 'Pair_Num' or 'Player_Name' as the key
+```{r}
+
+step16 <- step13 %>% mutate(Player_Name = str_trim(Player_Name)) %>% select(Player_Name, avg_opp) %>% distinct()
+
+final <- left_join(step15, step14, by = c("Pair_Num"))
+
+final <- left_join(final, step11, by = c("Pair_Num"))
+
+final <- left_join(final, step16, by = c("Player_Name"))
+
+final <- final %>% select(Player_Name, Player_State = Location, Total_Pts, Pre_Rating = Pre, Opponent_Avg_Pre = avg_opp)
+
+temp <- head(final)
+
+kableExtra::kable(temp)
+
+```
+
+### Now we can upload the final data frame to bit.io a free server
+
+* Create empty table
+* Use INSERT statement in postgres SQL to load data
+* Create SELECT statement in postgres SQL to get table
+
+```{r}
+
+#get my password for bit.i
+password <- key_get("bit.io", "catfoodlover_demo_db_connection")
+
+#connect to bit.io
+con <- dbConnect(RPostgreSQL::PostgreSQL(), dbname = 'bitdotio', 
+                 host = 'db.bit.io',
+                 port = 5432,
+                 user = 'bitdotio',
+                 password = password)
+
+
+#Create movies table
+DBI::dbSendQuery(con, 'CREATE TABLE IF NOT EXISTS "catfoodlover/demo_repo"."chess" (
+  player_name TEXT,
+  player_state TEXT,
+  total_points DOUBLE PRECISION,
+  pre_rating BIGINT,
+  opponent_rating_avg BIGINT
+)')
+
+#Insert data into table
+DBI::dbSendQuery(con, 'INSERT INTO "catfoodlover/demo_repo"."chess"  VALUES
+(\'GARY HUA\',   \'ON\' ,6.0  , 1794   ,1605),
+(\'DAKSHESH DARURI\',   \'MI\' ,6.0  , 1553   ,1469),
+(\'ADITYA BAJAJ\',   \'MI\' ,6.0  , 1384   ,1564),
+(\'PATRICK H SCHILLING\',   \'MI\' ,5.5  , 1716   ,1574),
+(\'HANSHI ZUO\',   \'MI\' ,5.5  , 1655   ,1501),
+(\'HANSEN SONG\',   \'OH\' ,5.0  , 1686   ,1519),
+(\'GARY DEE SWATHELL\',   \'MI\' ,5.0  , 1649   ,1372),
+(\'EZEKIEL HOUGHTON\',   \'MI\' ,5.0  , 1641,1468),
+(\'STEFANO LEE\',   \'ON\' ,5.0  , 1411   ,1523),
+(\'ANVIT RAO\',   \'MI\' ,5.0  , 1365   ,1554),
+(\'CAMERON WILLIAM MC LEMAN\',   \'MI\' ,4.5  , 1712   ,1468),
+(\'KENNETH J TACK\',   \'MI\' ,4.5  , 1663   ,1506),
+(\'TORRANCE HENRY JR\',   \'MI\' ,4.5  , 1666   ,1498),
+(\'BRADLEY SHAW\',   \'MI\' ,4.5  , 1610   ,1515),
+(\'ZACHARY JAMES HOUGHTON\',   \'MI\' ,4.5  , 1220,1484),
+(\'MIKE NIKITIN\',   \'MI\' ,4.0  , 1604   ,1386),
+(\'RONALD GRZEGORCZYK\',   \'MI\' ,4.0  , 1629   ,1499),
+(\'DAVID SUNDEEN\',   \'MI\' ,4.0  , 1600   ,1480),
+(\'DIPANKAR ROY\',   \'MI\' ,4.0  , 1564   ,1426),
+(\'JASON ZHENG\',   \'MI\' ,4.0  , 1595   ,1411),
+(\'DINH DANG BUI\',   \'ON\' ,4.0  , 1563,1470),
+(\'EUGENE L MCCLURE\',   \'MI\' ,4.0  , 1555   ,1300),
+(\'ALAN BUI\',   \'ON\' ,4.0  , 1363   ,1214),
+(\'MICHAEL R ALDRICH\',   \'MI\' ,4.0  , 1229   ,1357),
+(\'LOREN SCHWIEBERT\',   \'MI\' ,3.5  , 1745   ,1363),
+(\'MAX ZHU\',   \'ON\' ,3.5  , 1579   ,1507),
+(\'GAURAV GIDWANI\',   \'MI\' ,3.5  , 1552   ,1222),
+(\'SOFIA ADINA STANESCU-BELLU\',   \'MI\' ,3.5  , 1507   ,1522),
+(\'CHIEDOZIE OKORIE\',   \'MI\' ,3.5  , 1602,1314),
+(\'GEORGE AVERY JONES\',   \'ON\' ,3.5  , 1522   ,1144),
+(\'RISHI SHETTY\',   \'MI\' ,3.5  , 1494   ,1260),
+(\'JOSHUA PHILIP MATHEWS\',   \'ON\' ,3.5  , 1441   ,1379),
+(\'JADE GE\',   \'MI\' ,3.5  , 1449   ,1277),
+(\'MICHAEL JEFFERY THOMAS\',  \'MI\' ,3.5  , 1399   ,1375),
+(\'JOSHUA DAVID LEE\',   \'MI\' ,3.5  , 1438   ,1150),
+(\'SIDDHARTH JHA\',   \'MI\' ,3.5  , 1355   ,1388),
+(\'AMIYATOSH PWNANANDAM\',   \'MI\' ,3.5  ,  980,1385),
+(\'BRIAN LIU\',   \'MI\' ,3.0  , 1423   ,1539),
+(\'JOEL R HENDON\',   \'MI\' ,3.0  , 1436,1430),
+(\'FOREST ZHANG\',   \'MI\' ,3.0  , 1348   ,1391),
+(\'KYLE WILLIAM MURPHY\',  \'MI\' ,3.0  , 1403,1248),
+(\'JARED GE\',   \'MI\' ,3.0  , 1332   ,1150),
+(\'ROBERT GLEN VASEY\',   \'MI\' ,3.0  , 1283   ,1107),
+(\'JUSTIN D SCHILLING\',   \'MI\' ,3.0  , 1199   ,1327),
+(\'DEREK YAN\',   \'MI\' ,3.0  , 1242   ,1152),
+(\'JACOB ALEXANDER LAVALLEY\',   \'MI\' ,3.0  ,  377,1358),
+(\'ERIC WRIGHT\',   \'MI\',2.5  , 1362   ,1392),
+(\'DANIEL KHAIN\',   \'MI\' ,2.5  , 1382   ,1356),
+(\'MICHAEL J MARTIN\',   \'MI\' ,2.5  , 1291,1286),
+(\'SHIVAM JHA\',   \'MI\' ,2.5  , 1056   ,1296),
+(\'TEJAS AYYAGARI\',   \'MI\' ,2.5  , 1011   ,1356),
+(\'ETHAN GUO\',   \'MI\' ,2.5  ,  935   ,1495),
+(\'JOSE C YBARRA\',   \'MI\' ,2.0  , 1393   ,1345),
+(\'LARRY HODGE\',   \'MI\' ,2.0  , 1270   ,1206),
+(\'ALEX KONG\',   \'MI\' ,2.0  , 1186   ,1406),
+(\'MARISA RICCI\',   \'MI\' ,2.0  , 1153   ,1414),
+(\'MICHAEL LU\',   \'MI\',2.0  , 1092   ,1363),
+(\'VIRAJ MOHILE\',   \'MI\' ,2.0  ,  917   ,1391),
+(\'SEAN M MC CORMICK\',   \'MI\' ,2.0  ,  853   ,1319),
+(\'JULIA SHEN\',   \'MI\' ,1.5  ,  967   ,1330),
+(\'JEZZEL FARKAS\',   \'ON\' ,1.5  ,  955,1327),
+(\'ASHWIN BALAJI\',   \'MI\' ,1.0  , 1530   ,1186),
+(\'THOMAS JOSEPH HOSMER\',   \'MI\' ,1.0  , 1175   ,1350),
+(\'BEN LI\',   \'MI\' ,1.0  , 1163   ,1263);')
+
+```
+
+# Results
+```{r}
+
+d <- dbGetQuery(con, 'SELECT * FROM "catfoodlover/demo_repo"."chess";')
+
+
+kableExtra::kable(d, col.names = c("Player’s Name", "Player’s State", "Total Number of Points", "Player’s Pre-Rating",  "Average Pre Chess Rating of Opponents"))
+dbGetQuery(con, 'DROP TABLE "catfoodlover/demo_repo"."chess";')
+
+```
+
+# Conclusion
+
+### Getting this data into its final form of one row per player with aggregated opponent pre-tournament ranking required a number of different data wrangling skills
+
+* subsetting to split the data set into easier to manipulate pieces
+* regex to split fields and remove unnecessary characters 
+* reshaping to convert data from wide to long
+* group by to all for aggregation of stratified data
+* SQL to load data into data base for ease of access
+* This made me appreciate data already structured one event per row
+
+
+
+
