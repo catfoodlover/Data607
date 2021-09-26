@@ -1,0 +1,152 @@
+---
+title: "Data607_HW5_WilliamAiken.Rmd"
+author: "William Aiken"
+date: "9/26/2021"
+output: html_document
+---
+
+# Introduction
+### This is a creation and analysis of Israeli Vaccination data for Covid 19
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyr)
+library(readr)
+library(stringr)
+library(kableExtra)
+library(dplyr)
+```
+
+# Methods
+1. First we need to recreate the table of vaccination data
+* create a data frame to populate with our vaccination data
+* create column names based on the table provided
+* create a row name called 'Age'
+```{r}
+covid_df <-
+  data.frame(
+    Age = as.character(),
+    "Population.Not.Vaxed" = as.character(),
+    "Population.Fully.Vaxed" = as.character(),
+    "Severe.Cases.Not.Vax.per.100K" = as.character(),
+    "Severe.Cases.Fully.Vax.per.100K" = as.character(),
+    "Efficacy.vs.severe.disease" = as.character(), row.names = "Age"
+  )
+```
+
+2. Populate the rows of our csv, with a primary row based on age stratification
+* Create a secondary row with the age percentage
+* Blank values are represented with 'NA'
+```{r}
+covid_df['<50',]<- c('1,116,834', '3,501,118', '43', '11', NA)
+covid_df['<50%',]<- c('23.3%', '73.0%', NA, NA, NA)
+covid_df['>50',]<- c('186,078', '2,133,516', '171', '290', NA)
+covid_df['>50%',]<- c('7.9%%', '90.4%', NA, NA, NA)
+
+covid_df %>% kbl %>% kable_classic
+```
+
+3. Save out our csv that we are going to commit to github
+* We don't want to run this again
+```{r}
+#write.table(covid_df, "israeli_vaccination_data.csv", row.names=TRUE, sep = ",")
+```
+
+4. Load csv from github with readr
+```{r}
+file_path <- "https://raw.githubusercontent.com/catfoodlover/Data607/main/israeli_vaccination_data.csv"
+covid_df2 <- read_csv(file_path, show_col_types = FALSE)
+```
+
+5.  readr saves the data as a tibble which doesn't support row names so we need to fix our data structrue
+* convert to a data frame
+* name the rows the first column's values
+* save out a list of column names
+* delete the first column
+* split the last column which contains a comma separated list
+* rename the columns with the saved list
+* set all the strings 'NA' to NA
+```{r}
+covid_df2 <- as.data.frame(covid_df2)
+rownames(covid_df2) <- covid_df2[, 1]
+
+names_list <- names(covid_df2)
+covid_df2[,1] <- NULL
+
+covid_df2 <- covid_df2 %>% separate(Efficacy.vs.severe.disease, sep = ",", c("temp1", "temp2"))
+
+colnames(covid_df2) <- names_list
+
+covid_df2[covid_df2 == 'NA'] <- NA
+```
+
+6. We want to get the information in those secondary rows into columns
+* use case_when to detect row names and put the age stratification into a new column called 'age_group'
+* group by age_group and move those population %s into a new column and use the 'fill' function to populate all the rows
+* remove that no longer needed secondary row
+```{r}
+
+covid_df2 <-
+  covid_df2 %>% mutate(age_group = case_when(
+    str_detect(row.names(.), "<50") ~ "<50",
+    str_detect(row.names(.), ">50") ~ ">50"
+  )) %>% group_by(age_group) %>% mutate(
+    percent.not.vaxed = str_extract(Population.Not.Vaxed, ".*%"),
+    percent.vaxed  = str_extract(Population.Fully.Vaxed, ".*%")
+  ) %>% fill(percent.not.vaxed, .direction = c("up")) %>% fill(percent.vaxed, .direction = c("up")) %>% ungroup(.) %>% filter(!is.na(Severe.Cases.Not.Vax.per.100K))
+
+covid_df2 %>% kbl() %>% kable_classic()
+```
+
+7. Now we can calculate our Efficacy vs severe disease
+* we cast our severe cases per 100K to numeric and divide by 100K to get percentages
+* we calculate Efficacy as 1 - (% Severe cases vaccinated per 100K)/(% Severe cases not vaccinated per 100K)
+```{r}
+covid_df2 <-
+  covid_df2 %>% mutate(Efficacy.vs.severe.disease = 1 - ((as.numeric(Severe.Cases.Fully.Vax.per.100K)/100000)/(as.numeric(Severe.Cases.Not.Vax.per.100K)/100000)))
+```
+
+# Results
+
+1.  Do we have enough information to calculate the total population?
+
+### Yes we do, we know what percentages for both the under and over 50
+* We divide either treatment arm by the percent population they represent to get the total population
+* We sum the totals for both age groups to get the overall total population
+```{r}
+(under_50_pop <- 3501118/.73)
+
+(over_50_pop <- 2113516/.904)
+
+(total_pop <- under_50_pop + over_50_pop)
+```
+
+### This population represents people in Israel old enough to get vaccinated (12 years and older), total pop ~8.8 million
+
+2. We have already calculated the efficacy
+```{r}
+temp <- covid_df2 %>% group_by(age_group) %>% summarise(Efficacy.vs.severe.disease)
+
+kbl(temp) %>% kable_classic()
+```
+
+* We can see that vaccination has an efficacy of 74% in the under 50 group
+* The vaccine has a surprising -69% efficacy in the over 50 group
+* We will dig into explaining why this is in the next question
+
+3. From your calculation are you able to compare the rates of severe disease in unvaccinated and vaccinated individuals?
+
+```{r}
+
+covid_df2 %>% select(age_group, Population.Not.Vaxed, percent.not.vaxed, Population.Fully.Vaxed, percent.vaxed, Efficacy.vs.severe.disease) %>% kbl() %>% kable_classic()
+
+```
+
+### My calculation doesn't allow me to measure vaccine efficacy for a couple of reasons. 
+* Our percentages don't add up to 100% so I'm assuming partially vaccinated people and people vaccinated for less than 14 days are excluded?
+* Those people should be in another category
+* It also unclear to me what 'per 100k means', does it mean the entire cohort (>50/<50) or 100k within that age group and treatment arm?
+* The fact that such a high percentage of older Israelis have been vaccinated it's not surprising that there are more breakthrough infections than infections in the unvaccinated
+
+
+
