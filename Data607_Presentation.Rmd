@@ -1,0 +1,175 @@
+---
+title: "Choroplethr Exploration of New York Health Data"
+author: "Nate"
+date: "September 28 2021"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+***Introduction***
+This is an example of using the choroplethr package to look at some NY state healthcare data.
+
+The data sets used for this investigation were found on the New York state website. [data.ny.gov](https://data.ny.gov/browse?category=Health&utf8=%E2%9C%93)  
+
+Four different data sets were chosen:
+
+
+* diabetic rates
+* diabetic mortality rates 
+* average incomes by county
+* obesity rates by county
+
+***Data Manipulation and Visualization***
+Loading data
+```{r}
+library(dplyr)
+library(ggplot2)
+library(choroplethr)
+library(choroplethrMaps)
+library(readr)
+
+Income <- readr::read_delim("https://raw.githubusercontent.com/catfoodlover/Data607/main/Income.csv", delim = ';', show_col_types = FALSE)
+Mortality <- readr::read_delim("https://raw.githubusercontent.com/catfoodlover/Data607/main/Mortality.csv", delim = ';', show_col_types = FALSE)
+Obese <- readr::read_delim("https://raw.githubusercontent.com/catfoodlover/Data607/main/Obese.csv", delim = ';', show_col_types = FALSE)
+Diagnosed <- readr::read_delim("https://raw.githubusercontent.com/catfoodlover/Data607/main/Diagnosed.csv", delim = ';', show_col_types = FALSE)
+
+```
+
+Formatting data so the FIPS data can be joined in.
+```{r}
+data("county.regions")
+Diagnosed <- rename(Diagnosed, County = "County Name")
+Income <- rename(Income, County = "Place of Residence")
+Income <- rename(Income, Year = "Tax Year")
+Obese <- rename(Obese, County = "County Name")
+Mortality <- rename(Mortality, County = "County Name")
+Income$County <- as.character(Income$County)
+
+
+Income <-mutate(Income, County=ifelse(County=="New York City - Bronx", "Bronx", County))
+Income <-mutate(Income, County=ifelse(County=="New York City - Kings", "Kings", County))
+Income <-mutate(Income, County=ifelse(County=="New York City - Manhattan", "New York", County))
+Income <-mutate(Income, County=ifelse(County=="New York City - Queens", "Queens", County))
+Income <-mutate(Income, County=ifelse(County=="New York City - Richmond", "Richmond", County))
+
+
+Income09 <- filter(Income, Year == 2009)
+Income09 <- mutate(Income09, County = ifelse(County == "new york city", "new york", County))
+
+
+Obese$County <- tolower(Obese$County)
+Income09$County <- tolower(Income09$County)
+Mortality$County <- tolower(Mortality$County)
+Diagnosed$County <- tolower(Diagnosed$County)
+
+
+DiaDiagnosed <- filter(Diagnosed, Diagnosed$"Health Topic" %in% "Cirrhosis/Diabetes Indicators")
+
+
+DiaDiagnosed <- rename(DiaDiagnosed, value = "Percent/Rate")
+Mortality <- rename(Mortality, value = "Percentage/Rate")
+Income09 <- rename(Income09, value = "Average NY AGI of All Returns")
+Obese <- rename(Obese, value = "Percentage/Rate")
+
+
+Test <- filter(county.regions, state.name %in% "new york")
+
+#Income09 <- Income09 %>% mutate(County = as.character(County))
+
+Test2 <- left_join(Test, Obese, by = c("county.name" = "County"))
+Test3 <- left_join(Test, Income09, by = c("county.name" = "County"))
+Test4 <- left_join(Test, DiaDiagnosed, by = c("county.name" = "County"))
+Test5 <- left_join(Test, Mortality, by = c("county.name" = "County"))
+
+```
+
+Create choropleth maps for all my variables for New York and NYC.
+
+```{r}
+county_choropleth(Test2,
+                 title      = "2009 New York State Obesity Rates",
+                 legend     = "% Population Obese",
+                 num_colors = 1,
+                 state_zoom = c("new york"))
+                 
+new_york_city = c(36005, 36047, 36061, 36081, 36085)
+county_choropleth(Test2,
+                   title       = "2009 New York City Obesity Rates",
+                   legend      = "% Population Obese",
+                   num_colors  = 1,
+                   county_zoom = new_york_city)
+
+county_choropleth(Test3,
+                   title      = "2009 Average Incomes by County",
+                   legend     = "Average Income in Thousands of $",
+                   num_colors = 9,
+                   state_zoom = c("new york")) + scale_fill_brewer(palette=2)
+                   
+new_york_city = c(36005, 36047, 36061, 36081, 36085)
+county_choropleth(Test3,
+                   title       = "2009 Average Income",
+                   legend      = "Income in Thousands",
+                   num_colors  = 9,
+                   county_zoom = new_york_city)+scale_fill_brewer(palette=2)
+
+county_choropleth(Test4,
+                   title      = "Diabetic Rates per County",
+                   legend     = "Percent of population with Diabetes",
+                   num_colors = 9,
+                   state_zoom = c("new york")) + scale_fill_brewer(palette=3)
+                   
+new_york_city = c(36005, 36047, 36061, 36081, 36085)
+county_choropleth(Test4,
+                   title       = "Diabetic Rates per County",
+                   legend      = "Percent of population with Diabetes",
+                   num_colors  = 9,
+                   county_zoom = new_york_city)+scale_fill_brewer(palette=3)
+
+county_choropleth(Test5,
+                   title      = "Diabetic Deaths per County 2009-2011",
+                   legend     = "Percent of Deaths Caused by Diabetes",
+                   num_colors = 9,
+                   state_zoom = c("new york")) + scale_fill_brewer(palette=4)
+                   
+new_york_city = c(36005, 36047, 36061, 36081, 36085)
+county_choropleth(Test4,
+                   title       = "Percent of Diabetic Deaths per County",
+                   legend      = "Percent of Deaths Caused by Diabetes",
+                   num_colors  = 9,
+                   county_zoom = new_york_city)+scale_fill_brewer(palette=4)
+```
+
+Create scatter plots with loess regression line
+
+```{r}
+qplot(Test3$value, Test4$value, xlab = "Income in Thousands", ylab = "Percent Diabetic",
+ main = "Average Income vs Diabetic Rate in New York Counties") + (geom_smooth())
+
+qplot(Test3$value, Test5$value, xlab = "Income in Thousands", ylab = "Percent of Deaths attributed to Diabetes",
+ main = "Average Income vs Diabetic Mortality Rate in New York Counties") + (geom_smooth())
+
+qplot(Test3$value, Test2$value, xlab = "Income in Thousands", ylab = "Percent Obese",main = "Average Income vs Obese Rate in New York Counties") +
+(geom_smooth())
+
+qplot(Test4$value, Test2$value, xlab = "Percent Diabetic", ylab = "Percent Obese",main = "Percent Diabetic vs Percent Obese") +
+(geom_smooth())
+```
+
+
+
+
+
+***Conclusion***
+Choroplethr is a great way to visualize data with a geographic component.
+
+We found that there is a negative relationship income level and diabetic incidence.
+
+There is also a positive relationship between obesity rates and diabetic rates.  
+
+The diabetic mortality rate unsurprisingly mirrors the diabetic incidence rate.  
+
+One interesting finding was that the while the Bronx was the poorest county it was not the county with the highest diabetic, obesity, or diabetic death rate.
+
+
