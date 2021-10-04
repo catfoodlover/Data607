@@ -1,0 +1,249 @@
+---
+title: "Data607 Project 2"
+author: "William Aiken"
+date: "10/3/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Introduction
+
+### This project was to explore three different wide datasets in 3 steps:
+
+1. Save datasets in wide format as .CSV files
+
+2. Read in and transform data set as required for analysis as listed in discussion post
+
+3. Perform requested analysis from discussion post
+
+### I chose my datasets from 3 different discussion posts:
+
+* I selected Parks_Properties.csv from Krutika Patel's discussion post "NYC Park Properties".  The requested analysis was to explore the acquisition rates for the NYC parks but the final analysis was left open-ended.
+[Link to orignal dataset](https://catalog.data.gov/dataset/parks-properties)
+
+* I selected  2015_Street_Tree_Census.csv from Shane Hylton's discussion post "NYC Street Trees".  The requested analysis was to explore the most common sidewalk tree by zip code.
+[Link to orignal dataset]("https://data.cityofnewyork.us/Environment/2015-Street-Tree-Census-Tree-Data/uvpi-gqnh/data")
+
+* Lastly, I selected "day-by-day.csv" from my own discussion post"COVID-19 Mortality Rates in NYC".  The requested analysis was to explore the relationship between mortality and hospitalization by county in NYC.
+[Link to original dataset]("https://www1.nyc.gov/site/doh/covid/covid-19-data-totals.page")
+
+# Methods
+
+### 1. Load in packages and read in datasets
+
+* I cut down the 2015_Street_Tree_Census.csv from 45 column to 3 before pushing it to GitHub.  Due to its 683788 rows I couldn't push it otherwise.
+
+```{r}
+library(dplyr)
+library(reshape2)
+library(tidyr)
+library(choroplethr)
+library(choroplethrMaps)
+library(choroplethrZip)
+library(lubridate)
+
+data("county.regions")
+
+parks_df <- read.csv("https://raw.githubusercontent.com/catfoodlover/Data607/main/Parks_Properties.csv")
+
+trees_df <- read.csv("https://raw.githubusercontent.com/catfoodlover/Data607/e4f08ddb8cd8d7bbece7d9512ae3708921c72acd/2015_Street_Tree_Census.csv")
+
+covid_df <- read.csv("https://raw.githubusercontent.com/catfoodlover/Data607/main/data-by-day.csv")
+```
+
+### 2.clean and reshape the COVID-19 dataset
+
+* filter dataset down to just the September 2021 data and select the hospitalization and mortality columns
+```{r}
+covid_df$date <- mdy(covid_df$date_of_interest)
+
+covid_temp <-
+  covid_df %>% filter(date > "2021-08-31") %>% select(
+    date,
+    BX_HOSPITALIZED_COUNT,
+    BX_DEATH_COUNT,
+    MN_HOSPITALIZED_COUNT,
+    MN_DEATH_COUNT,
+    SI_HOSPITALIZED_COUNT,
+    SI_DEATH_COUNT,
+    QN_HOSPITALIZED_COUNT,
+    QN_DEATH_COUNT,
+    BK_HOSPITALIZED_COUNT,
+    BK_DEATH_COUNT
+  )
+```
+
+* Split the hospitalization and mortality data into two separate data frames
+
+```{r}
+death_temp <- covid_temp %>% select(date, contains("DEATH"))
+
+hosp_temp <- covid_temp %>% select(date, contains("HOSPITALIZED"))
+```
+
+* Reshape the the dataframe from wide to long with date as the id column
+
+* Create a column called 'county' to group by and join on later
+
+* Use the summarize function to create by county mortality and hospitalization counts
+
+```{r}
+death_temp <- death_temp %>% melt(id.vars = "date", measure.vars = c("BX_DEATH_COUNT", "MN_DEATH_COUNT", "SI_DEATH_COUNT","QN_DEATH_COUNT", "BK_DEATH_COUNT"))
+
+death_temp <- death_temp %>% mutate(county = case_when(grepl('BK', variable) ~ "kings",
+                                                       grepl('MN', variable) ~ "new york",
+                                                       grepl('QN', variable) ~ "queens",
+                                                       grepl('SI', variable) ~ "richmond",
+                                                       grepl('BX', variable) ~ "bronx"))
+
+death_temp <- death_temp %>% group_by(county) %>% summarise(tot_death = sum(value))
+
+
+
+
+hosp_temp <- hosp_temp %>% melt(id.vars = "date", measure.vars = c("BX_HOSPITALIZED_COUNT", "MN_HOSPITALIZED_COUNT", "SI_HOSPITALIZED_COUNT","QN_HOSPITALIZED_COUNT", "BK_HOSPITALIZED_COUNT"))
+
+hosp_temp <- hosp_temp %>% mutate(county = case_when(grepl('BK', variable) ~ "kings",
+                                                     grepl('MN', variable) ~ "new york",
+                                                     grepl('QN', variable) ~ "queens",
+                                                     grepl('SI', variable) ~ "richmond",
+                                                     grepl('BX', variable) ~ "bronx"))
+
+hosp_temp <- hosp_temp %>% group_by(county) %>% summarise(tot_hosp = sum(value))
+```
+
+* join the hospitalization and mortality data frames together and calculate and mortality/hospitalization rate as a proxy for patient care
+
+```{r}
+rate_df <- left_join(death_temp, hosp_temp, by=c("county"))
+
+rate_df <- rate_df %>% mutate(value = tot_death/tot_hosp)
+
+```
+
+### 3.  plots mortality/hospitalization rate by borough with a choropleth map
+
+* filter the FIPS codes down to just NYC
+
+* left join FIPS codes into dataset
+
+```{r}
+FIPS <- filter(county.regions, state.name %in% "new york")
+
+rate_df <- left_join(rate_df, FIPS, by = c("county" = "county.name"))
+
+new_york_city = c(36005, 36047, 36061, 36081, 36085)
+county_choropleth(rate_df,
+                  title       = "September 2021 Covid Death vs Hospitalization Rate for NYC",
+                  legend      = "Confirmed Covid-19 Deaths/Confirmed Covid-19 Hospitalizations",
+                  num_colors  = 1,
+                  county_zoom = new_york_city)
+
+```
+
+### 4. Clean the parks dataset
+
+* clean the county to conform with the FIPS codes
+
+* convert the acquisition date for the parks from a datetime to a date
+
+* create a year of acquisition
+
+* create a dummy variable of whether the park is more than 100 years old
+
+* select just the columns of interest
+
+* group by county and calculate the percentage of parks more than 100 years old
+
+* left join the FIPS codes to the by borough rate of old parks
+
+```{r}
+park_temp <- parks_df %>% mutate(county = case_when(BOROUGH == 'B' ~ "kings",
+                                  BOROUGH == 'M' ~ "new york",
+                                  BOROUGH == 'Q' ~ "queens",
+                                  BOROUGH == 'R' ~ "richmond",
+                                  BOROUGH == 'X' ~ "bronx"))
+
+park_temp <- park_temp %>% mutate(acquisitonDate = ymd(gsub('00:00.*', '', ACQUISITIONDATE)))
+park_temp <- park_temp %>% mutate(yoa = year(acquisitonDate))
+
+park_temp <- park_temp %>% group_by(county) %>%
+  mutate(tot_acres = sum(as.numeric(ACRES), na.rm = TRUE), older = as.numeric(yoa < 1921)) %>%
+  ungroup() %>% select(GlobalID, county, tot_acres, older)
+
+park_temp <- park_temp %>% group_by(county) %>%
+  summarise(per_100yrs_old = mean(older, na.rm = TRUE))
+
+FIPS <- filter(county.regions, state.name %in% "new york")
+
+park_temp <- left_join(park_temp, FIPS, by = c("county" = "county.name"))
+
+park_temp <- park_temp %>% rename(value = per_100yrs_old )
+```
+
+### 5. Plot the percentage of parks more than 100 years old by borough in a choropleth map
+
+* This gives a geographical representation of the the acquisition dates for NYC parks
+
+```{r}
+new_york_city = c(36005, 36047, 36061, 36081, 36085)
+county_choropleth(park_temp,
+                  title       = "Park Age by Borough",
+                  legend      = "Percent of Parks More Than 100 Years Old",
+                  num_colors  = 1,
+                  county_zoom = new_york_city)
+```
+
+### 6. Clean and reshape the street trees dataset
+
+* filter off rows where the common name is blank
+
+* group by zip code and common name and create a count of trees by county and species
+
+* group by zip code and take the row with the maximum count of trees by species for each zip code
+
+* select off just the columns of interest
+
+* filter out zip codes not found in choroplethrZip NYC zip code list
+
+* it should be noted that Central Park is included in this excluded list of zip codes
+
+```{r}
+trees_df <-
+  trees_df %>% filter(spc_common != '') %>%
+  mutate(region = postcode) %>% 
+  group_by(region, spc_common) %>%
+  mutate(tree_count = n()) %>% ungroup() %>%
+  group_by(region) %>%
+  slice_max(tree_count, n=1, with_ties = FALSE) %>% 
+  ungroup() %>%
+  select(region, spc_common, tree_count) %>%
+  distinct()
+
+trees_df <- trees_df %>% mutate(value = spc_common) %>% filter(!region %in% c(10048, 83, 10281, 11249, 11251)) %>% mutate(region = as.character(region))
+
+nyc_fips = c(36005, 36047, 36061, 36081, 36085)
+```
+
+### 7. Create a choropleth map of most common tree species by zip code
+
+```{r}
+zip_choropleth(trees_df,
+               county_zoom = nyc_fips,
+               title       = "NYC 2015 Street Tree Count",
+               legend      = "Most Common Tree by Zip Code")
+```
+
+# Results
+
+#### For the COVID-19 mortality/hospitalization rate Queens and Brooklyn have the highest rates and Manhattan has the lowest rate.  It's unsurprising tha Manhattan is the lowest with the highest income by county in the state.  It is surprising that The Bronx has a lower mortality/hospitalization rate than Queens or Brooklyn considering that it is one of the poorest counties in the state.
+
+#### For the parks dataset it was shown that Manhattan has the oldest park acquisition with the oldest going back to the 17th century.  Staten Island has the fewest old parks.
+
+#### For the trees dataset it was interesting to see that there were 10 tree species in the list of most common trees by zip code.  The Honey Locust dominates Manhattan while the London Plane Tree dominates Queens and Brooklyn.  Interestingly, the zip code of 11003 is missing from this dataset, hence why the neighborhood of Elmont is colored black.
+
+
+
