@@ -1,0 +1,105 @@
+---
+title: "Data 607 HW 7"
+author: "William Aiken"
+date: "10/10/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(kableExtra)
+library(tidyverse)
+library(rjson)
+library(tableHTML)
+library(textreadr)
+```
+
+
+## Introduction
+
+This assignment is an exploration of three different file types: html, json, and xml.  I am creating tables with information about 3 books I have enjoyed in the area of biology.  These tables were manually created as html, json, and xml documents which are saved on Github.
+
+## Methods
+1.  First create a reference table of my data in R
+```{r}
+#create a target data frame to compare against
+books_df <- data.frame(Title = c("The Mushroom Cultivator: A Practical Guide to Growing Mushrooms at Home", "The Origin of Birds", "Moss Gardening: Including Lichens, Liverworts and Other Miniatures"),
+                   Authors = c("Paul Stamets and J. S. Chilton", "Gerhard Heilmann", "George Schenk"),
+                   Note1=  c("This is an exaustive guide to mushroom cultivation", "Gerhard Heilmann's diagrams of comparative anatomy convinced people that birds evolved from lizards and not dinosaurs", "This is the authoratative guide on growing moss"),
+                   Note2 = c("I don't have the space in a one bedroom apartment to grow mushrooms so it's just a decoration", "This book set back our understanding of birds by 50 years", "This isn't a book you bring up on a first date"))
+
+books_df %>% kbl() %>% kable_styling()
+```
+
+2. Read in my html file and convert to a data frame
+
+* read_html() returned a character vector that must be transformed into a data frame
+```{r}
+
+#Read in html
+books_html <- read_html("https://raw.githubusercontent.com/catfoodlover/Data607/main/books.html")
+
+#It returns a character vector that must be split up and joined in a data frame
+book1 <- books_html[5:8]
+book2 <- books_html[9:12]
+book3 <- books_html[13:16]
+
+books_html_df <- data.frame(Title = character(), Authors = character(), Note1 = character(), Note2 = character())
+
+books_html_df[1,] <- book1
+books_html_df[2,] <- book2
+books_html_df[3,] <- book3
+
+books_html_df %>% kbl() %>% kable_styling()
+```
+
+3.  Read in XML and convert to a data frame
+ * Again read_xml returned a character string that must be converted into a data frame
+```{r}
+# Read in the xml
+books_xml <- read_xml("https://raw.githubusercontent.com/catfoodlover/Data607/main/books.xml")
+
+# create a data frame 
+books_xml_df <- data.frame(Title = character(), Authors = character(), Note1 = character(), Note2 = character())
+
+# parse the character string into the 3 separate books
+book1 <- books_xml[1:4]
+book2 <- books_xml[5:8]
+book3 <- books_xml[9:12]
+
+books_xml_df[1,] <- book1
+books_xml_df[2,] <- book2
+books_xml_df[3,] <- book3
+
+books_xml_df %>% kbl() %>% kable_styling()
+```
+
+4.  Read in the JSON data and convert to a data frame
+
+* Unlike the last two formats fromJSON() gave me a list of lists that need to be converted to a data frame
+```{r}
+# pull in the json
+books_json<- fromJSON( file = "https://raw.githubusercontent.com/catfoodlover/Data607/main/books.json")
+
+# This gives me a list of lists which requires me to extract the sub lists
+books_json <- books_json[[1]]
+
+book1 <- books_json[[1]]
+book2 <- books_json[[2]]
+book3 <- books_json[[3]]
+
+book1_df <- as.data.frame(book1)
+book2_df <- as.data.frame(book2)
+book3_df <- as.data.frame(book3)
+
+books_json_df <- bind_rows(book1_df, book2_df, book3_df)
+
+books_json_df %>% kbl() %>% kable_styling()
+```
+
+## Conclusion
+
+The resulting data frames all looked the same but the approach to parsing the data varied based on the source.
+
+
+
