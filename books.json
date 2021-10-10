@@ -1,0 +1,23 @@
+{
+  "books": [
+    {
+      "Title": "The Mushroom Cultivator: A Practical Guide to Growing Mushrooms at Home",
+      "Authors":
+        "Paul Stamets and J. S. Chilton",
+      "Note1": "This is an exaustive guide to mushroom cultivation",
+      "Note2": "I don't have the space in a one bedroom apartment to grow mushrooms so it's just a decoration"
+    },
+    {
+      "Title": "The Origin of Birds",
+      "Authors": "Gerhard Heilmann",
+      "Note1": "Gerhard Heilmann's diagrams of comparative anatomy convinced people that birds evolved from lizards and not dinosaurs",
+      "Note2": "This book set back our understanding of birds by 50 years"
+    },
+    {
+      "Title": "Moss Gardening: Including Lichens, Liverworts and Other Miniatures",
+      "Authors": "George Schenk",
+      "Note1": "This is the authoratative guide on growing moss",
+      "Note2": "This isn't a book you bring up on a first date"
+    }
+  ]
+}
