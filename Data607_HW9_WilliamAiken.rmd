@@ -1,0 +1,104 @@
+---
+title: "Data607 HW9 WilliamAiken"
+author: "William Aiken"
+date: "10/24/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+This assignment is an exploration in the use of *The New York Times* api directly from inside R
+
+## Method
+#### 1.  Created an account with *The New York Times* and request an API key
+[link](https://developer.nytimes.com/)
+
+#### 2.  Loaded libraries and used the keyring package to save my API key into my environment
+```{r}
+library(jsonlite)
+library(tidyverse)
+library(keyring)
+library(kableExtra)
+
+first_time <- FALSE
+
+
+#If this is the very first time you are running this script you need to use save out your api key using keyring
+if(first_time){
+key_set_with_value(service = "NYT api",password = "YOUR_API_KEY_GOES_HERE")
+}
+api_key <- key_get("NYT api")
+```
+
+#### 3.  I used an article by Jonathan D Fitzgerald on storybench.org to get started with the jsonlite package
+[link](https://www.storybench.org/working-with-the-new-york-times-api-in-r/)
+
+* I used the paste0 function to concatenate my api key into the my query to the NYT api
+* The fromJSON and data.frame function do the heavy lifting of converting my JSON into a data frame
+* Queried articles related to 'molecular fossils' - organic compounds in the fossil record that are derived from once living organisms since the beginning of 2021.
+
+* I used the NYT Most Popular API
+
+```{r}
+#Lets connect and look for articles in the Most Popular API related to molecular fossil
+results <- fromJSON(paste0("http://api.nytimes.com/svc/search/v2/articlesearch.json?q=molecular fossil&begin_date=20210101&api-key=",api_key), flatten = TRUE) %>% data.frame()
+glimpse(results)
+```
+
+#### 4.  I select the columns that I'm interested after inspecting the data frame head with 'glimpse' (I also really like 'names()')
+
+* I kept the headline, abstract and section columns in the data frame
+
+```{r}
+reduced_results <- results %>% select(headline = response.docs.headline.main, abstract = response.docs.abstract, section = response.docs.section_name)
+
+reduced_results %>% kbl() %>% kable_styling()
+```
+
+#### 5.  The NYT api only returns 10 responses at a time.  With the jsonlite package it is possible to iteratively pull all responses 10 at a time
+
+* Saved out the query as a string
+* Calculate how many times you need to iterate by counting the number of hits and dividing by 10 (this is Jonathan D Fitzgerald's method)
+
+```{r}
+baseurl <- paste0("http://api.nytimes.com/svc/search/v2/articlesearch.json?q=molecular fossil&begin_date=20180101&api-key=",api_key)
+
+
+initialQuery <- fromJSON(baseurl)
+maxPages <- round((initialQuery$response$meta$hits[1] / 10)-1) 
+```
+
+#### 6. Now you save all the 'pages' as a list that you generate by iterating over a for loop (this is Jonathan D Fitzgerald's method)
+
+* use the rbind_pages function to create a data frame
+* I reduce my data frame down to the colums of interest
+
+```{r}
+pages <- list()
+for(i in 0:maxPages){
+  nytSearch <- fromJSON(paste0(baseurl, "&page=", i), flatten = TRUE) %>% data.frame() 
+  message("Retrieving page ", i)
+  pages[[i+1]] <- nytSearch 
+  Sys.sleep(2) 
+}
+
+all_results <- rbind_pages(pages)
+
+all_reduced_results <- all_results %>% select(headline = response.docs.headline.main, abstract = response.docs.abstract, section = response.docs.section_name)
+```
+
+
+## Results
+
+Grouped by section and counted the number of articles about 'molecular fossils' that came from each section since 2018.
+
+```{r}
+all_reduced_results %>% group_by(section) %>% count() %>% kbl() %>% kable_styling()
+```
+
+## Conclusion
+
+It's easy to get great out of the box performance with th jsonlite package when querying APIs.  I did try a couple of additional things that I haven't documented.  I tried the R nytimes package and found it limiting and also explored querying subjects with more results and found that this for loop approach runs into trouble with results greater than 150 articles.
