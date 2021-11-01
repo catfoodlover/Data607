@@ -1,0 +1,591 @@
+---
+title: "DATA607 HW10 WilliamAiken"
+author: "William Aiken"
+date: "10/31/2021"
+output: html_document
+---
+
+# Introduction
+
+This is an exploration of sentiment analysis using R packages.  The code is taken from the book  _Text Mining with R: A Tidy Approach_ 1.
+
+```{r setup, include=FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Method
+
+__2.1 The sentiments datasets__
+
+* Get the 3 different sentiment lexicons
+```{r}
+library(tidytext)
+
+get_sentiments("afinn")
+
+get_sentiments("bing")
+
+get_sentiments("nrc")
+```
+
+__2.2 Sentiment analysis with inner join__
+
+* Calculate the line number and chapter for each book
+* Convert the books to one word per row
+
+```{r}
+library(janeaustenr)
+library(dplyr)
+library(stringr)
+
+tidy_books <- austen_books() %>%
+  group_by(book) %>%
+  mutate(
+    linenumber = row_number(),
+    chapter = cumsum(str_detect(text, 
+                                regex("^chapter [\\divxlc]", 
+                                      ignore_case = TRUE)))) %>%
+  ungroup() %>%
+  unnest_tokens(word, text)
+```
+
+* Look at the book _Emma_ for occurrences of words related to 'joy'.  The most common words were 'good' and 'friend'
+
+```{r}
+nrc_joy <- get_sentiments("nrc") %>% 
+  filter(sentiment == "joy")
+
+tidy_books %>%
+  filter(book == "Emma") %>%
+  inner_join(nrc_joy) %>%
+  count(word, sort = TRUE)
+```
+
+* calculate the sentiment for 80 line segments of the 6 Jane Austin books
+
+```{r}
+library(tidyr)
+
+jane_austen_sentiment <- tidy_books %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(book, index = linenumber %/% 80, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>% 
+  mutate(sentiment = positive - negative)
+```
+
+* Plot the sentiment side-by-side.  The books are all pretty positive overall, with the most positive book being _Persuasion_ and the most negative being _Northanger Abbey_.
+
+```{r}
+library(ggplot2)
+
+ggplot(jane_austen_sentiment, aes(index, sentiment, fill = book)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~book, ncol = 2, scales = "free_x")
+```
+
+__2.3 Comparing the three sentiment dictionaries__
+
+```{r}
+
+pride_prejudice <- tidy_books %>% 
+  filter(book == "Pride & Prejudice")
+
+pride_prejudice
+
+```
+* We can compare how each sentiment lexicon interprets a single work _Pride and Prejudice_
+
+```{r}
+afinn <- pride_prejudice %>% 
+  inner_join(get_sentiments("afinn")) %>% 
+  group_by(index = linenumber %/% 80) %>% 
+  summarise(sentiment = sum(value)) %>% 
+  mutate(method = "AFINN")
+
+bing_and_nrc <- bind_rows(
+  pride_prejudice %>% 
+    inner_join(get_sentiments("bing")) %>%
+    mutate(method = "Bing et al."),
+  pride_prejudice %>% 
+    inner_join(get_sentiments("nrc") %>% 
+                 filter(sentiment %in% c("positive", 
+                                         "negative"))
+    ) %>%
+    mutate(method = "NRC")) %>%
+  count(method, index = linenumber %/% 80, sentiment) %>%
+  pivot_wider(names_from = sentiment,
+              values_from = n,
+              values_fill = 0) %>% 
+  mutate(sentiment = positive - negative)
+```
+
+* When plotted, we see that there is surprising variation in how each lexicon interprets the work.  NRC has the most positive interpretation while Bing has the least postive.
+
+```{r}
+bind_rows(afinn, 
+          bing_and_nrc) %>%
+  ggplot(aes(index, sentiment, fill = method)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~method, ncol = 1, scales = "free_y")
+```
+* We can get a count on the positive and negative words in the different lexicons.  Even though NRC has an overall very positive impression of the work.  There were more negative term in the lexicon, 3 negative words for every 2 positive words.
+
+```{r}
+get_sentiments("nrc") %>% 
+  filter(sentiment %in% c("positive", "negative")) %>% 
+  count(sentiment)
+```
+* Bing on the other had a far more negative impression of the work and unsurprisingly had twice as many negative words in the lexicon.
+
+```{r}
+get_sentiments("bing") %>% 
+  count(sentiment)
+```
+
+__2.4 Most common positive and negative words__
+
+* We can join the bing lexicon to the 6 Austen works and find the most common positive and negative words.  The most common positve word was "well" while the most common negative word was "miss".
+
+```{r}
+bing_word_counts <- tidy_books %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+bing_word_counts
+
+```
+
+* We can look at a bar chart of the most common positive and negative words.  'Miss' is far and away the most common negative word while 'well' and 'good' are very close in frequency for most common positive words.
+
+```{r}
+bing_word_counts %>%
+  group_by(sentiment) %>%
+  slice_max(n, n = 10) %>% 
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(x = "Contribution to sentiment",
+       y = NULL)
+
+```
+
+* We can add 'miss' to our stop words because Austen is using it differently than the negative word we are thinking of
+
+```{r}
+custom_stop_words <- bind_rows(tibble(word = c("miss"),  
+                                      lexicon = c("custom")), 
+                               stop_words)
+
+custom_stop_words
+```
+
+__2.5 Wordclouds__
+
+* We can filter out our stop words from our works and then create a word cloud with the top 100 most frequent words
+
+The most common word is 'time'
+
+```{r}
+library(wordcloud)
+
+tidy_books %>%
+  anti_join(stop_words) %>%
+  count(word) %>%
+  with(wordcloud(word, n, max.words = 100))
+
+```
+
+* We can do create word clouds of common words sorted by sentiment.  As we saw before the most common positive words are 'well' and 'good'.  The most common negative word is 'miss'.
+
+```{r}
+library(reshape2)
+
+tidy_books %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  acast(word ~ sentiment, value.var = "n", fill = 0) %>%
+  comparison.cloud(colors = c("gray20", "gray80"),
+                   max.words = 100)
+```
+
+__2.6 Looking at units beyond just words__
+
+* We also have the ability to see words at the sentence level.
+
+```{r}
+p_and_p_sentences <- tibble(text = prideprejudice) %>% 
+  unnest_tokens(sentence, text, token = "sentences")
+```
+
+```{r}
+p_and_p_sentences$sentence[2]
+
+austen_chapters <- austen_books() %>%
+  group_by(book) %>%
+  unnest_tokens(chapter, text, token = "regex", 
+                pattern = "Chapter|CHAPTER [\\dIVXLC]") %>%
+  ungroup()
+
+austen_chapters %>% 
+  group_by(book) %>% 
+  summarise(chapters = n())
+```
+
+* We can calculate the percentage of words that are negative.  For the 6 chosen works between 3-5% words are negative.
+
+```{r}
+bingnegative <- get_sentiments("bing") %>% 
+  filter(sentiment == "negative")
+
+wordcounts <- tidy_books %>%
+  group_by(book, chapter) %>%
+  summarize(words = n())
+
+tidy_books %>%
+  semi_join(bingnegative) %>%
+  group_by(book, chapter) %>%
+  summarize(negativewords = n()) %>%
+  left_join(wordcounts, by = c("book", "chapter")) %>%
+  mutate(ratio = negativewords/words) %>%
+  filter(chapter != 0) %>%
+  slice_max(ratio, n = 1) %>% 
+  ungroup()
+```
+
+### Now with a new text...
+
+Here we load the text that we will use in the second half of this data exploration.  We use the 'gutenbergr' package to load some books by Mark Twain.
+
+* We look to see what works are available by Mark Twain.
+* Then we load the four works of interest.
+* The books require some filtering, we don't want any table of contents or prefaces
+
+```{r}
+library(gutenbergr)
+library(SentimentAnalysis)
+library(kableExtra)
+
+temp <- gutenberg_works(author == "Twain, Mark")
+twain <- gutenberg_download(c("74", "76", "86", "1837"))
+
+#split the books up to remove the index and preface
+t1 <- twain %>% filter(gutenberg_id == 74)
+t1 <- t1[459:nrow(t1),]
+
+t2 <- twain %>% filter(gutenberg_id == 76)
+t2 <- t2[514:nrow(t2),]
+
+t3 <- twain %>% filter(gutenberg_id == 86)
+t3 <- t3[332:nrow(t3),]
+
+t4 <- twain %>% filter(gutenberg_id == 1837)
+t4 <- t4[444:nrow(t4),]
+
+twain_books <- bind_rows(t1, t2, t3, t4)
+
+twain_books %>% group_by(gutenberg_id) %>% summarise(n())
+```
+2.2 Sentiment analysis with inner join
+
+Before we can do sentiment analysis we need to further organize the data.  The Twain data is not as clean as the Austen data.  We have a bunch of rows that we don't want included (preface, table of contents. table of illustrations).
+
+* We group by book and generate the line number from the row number
+* We using a pretty clever way to calculate the chapter, we use the str_detect function to search for chapter beginning and take the cumulative sum of their occurrences
+* We use the unnest_tokens() function that results in a tidy dataframe of one word per row
+* We also add in the book titles based on their 'gutenberg_id'
+
+
+```{r}
+
+
+tidy_books <- twain_books %>%
+  group_by(gutenberg_id) %>%
+  mutate(linenumber = row_number(),
+         chapter = cumsum(str_detect(
+           text,
+           regex("^chapter [\\divxlc]",
+                 ignore_case = TRUE)
+         ))) %>%
+  ungroup() %>%
+  unnest_tokens(word, text) %>% mutate(
+    title = case_when(
+      gutenberg_id == 74 ~ "The Adventures of Tom Sawyer",
+      gutenberg_id == 76 ~ "Adventures of Huckleberry Finn",
+      gutenberg_id == 86 ~ "A Connecticut Yankee in King Arthur's Court",
+      gutenberg_id == 1837 ~ "The Prince and the Pauper"
+    )
+  )
+```
+
+We use the 'nrc' lexicon to do an analysis of the 'joy' in the book 	
+_The Adventures of Tom Sawyer_.
+
+* We use the get_sentiments() function to get the 'nrc' lexicon
+* We filter down to just the words that imply/related to 'joy'
+* We inner join on the words of the book and the lexicon words related to 'joy'
+* Last we do a count on those words
+
+We find that the most common words used associated with 'joy' are 'good' and 'found'.
+```{r}
+nrc_joy <- get_sentiments("nrc") %>% 
+  filter(sentiment == "joy")
+
+tidy_books %>%
+  filter(gutenberg_id == 74) %>%
+  inner_join(nrc_joy) %>%
+  count(word, sort = TRUE)
+```
+
+We use the bing lexicon to calculate the positive and negative sentiment for 4 works by Mark Twain.
+
+* We join in the Bing lexicon
+* We chunk up our text into 80 line segments
+* We use the 'pivot_wider' function to split the sentiment into two separate columns
+* We calculate the sentiment by subtracting the negative from the positive
+
+
+```{r}
+library(tidyr)
+
+twain_sentiment <- tidy_books %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(gutenberg_id, index = linenumber %/% 80, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>% 
+  mutate(sentiment = positive - negative,     title = case_when(
+      gutenberg_id == 74 ~ "The Adventures of Tom Sawyer",
+      gutenberg_id == 76 ~ "Adventures of Huckleberry Finn",
+      gutenberg_id == 86 ~ "A Connecticut Yankee in King Arthur's Court",
+      gutenberg_id == 1837 ~ "The Prince and the Pauper"
+    )
+  )
+```
+
+Here we plot the sentiment over 80 line segments.  We find the most positive of the four chosen works to be _Adventures of Huckleberry Fin' and the most negative work to be _The Adventures of Tom Sawyer_
+
+```{r}
+library(ggplot2)
+
+ggplot(twain_sentiment, aes(index, sentiment, fill = title)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~title, ncol = 2, scales = "free_x")
+```
+
+2.3 Comparing the three sentiment dictionaries
+
+* We filter down to just one title _The Adventures of Tom Sawyer_
+
+```{r}
+
+tom_sawyer <- tidy_books %>% 
+  filter(title == "The Adventures of Tom Sawyer")
+
+tom_sawyer
+
+```
+We take 3 seperate lexicons and calculate the sentiment for 80 line segments for the _The Adventures of Tom Sawyer_
+
+* We inner join the lexicons to our tidy corpus
+* We group by the index (80 line segments)
+* We calculate sentiment for each index (varies by lexicon)
+
+```{r}
+afinn <- tom_sawyer %>% 
+  inner_join(get_sentiments("afinn")) %>% 
+  group_by(index = linenumber %/% 80) %>% 
+  summarise(sentiment = sum(value)) %>% 
+  mutate(method = "AFINN")
+
+bing_and_nrc <- bind_rows(
+  tom_sawyer %>% 
+    inner_join(get_sentiments("bing")) %>%
+    mutate(method = "Bing et al."),
+  tom_sawyer %>% 
+    inner_join(get_sentiments("nrc") %>% 
+                 filter(sentiment %in% c("positive", 
+                                         "negative"))
+    ) %>%
+    mutate(method = "NRC")) %>%
+  count(method, index = linenumber %/% 80, sentiment) %>%
+  pivot_wider(names_from = sentiment,
+              values_from = n,
+              values_fill = 0) %>% 
+  mutate(sentiment = positive - negative)
+```
+
+We bind each lexicon's sentiment and plot them side-by-side.  The three approaches give surprisingly similar plots.
+```{r}
+bind_rows(afinn, 
+          bing_and_nrc) %>%
+  ggplot(aes(index, sentiment, fill = method)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~method, ncol = 1, scales = "free_y")
+```
+
+* Like we did with the Austen works, we can get counts of the positive and negative words for each lexicon.
+
+```{r}
+get_sentiments("nrc") %>% 
+  filter(sentiment %in% c("positive", "negative")) %>% 
+  count(sentiment)
+```
+
+```{r}
+get_sentiments("bing") %>% 
+  count(sentiment)
+```
+
+2.4 Most common positive and negative words
+
+When we do count so positive and negative words again 'well' and 'good' are the most common.  I wonder if it is because common idioms contain those words?  The most common negative word is 'poor'.  Mark Twain was a person who continued to struggle with money personally.  I wonder if his own financial insecurity crept into his work?
+
+```{r}
+bing_word_counts <- tidy_books %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+bing_word_counts
+
+```
+
+* When we plot the negative and positive word frequencies we see that 'well and good' are very close in frequency and 'poor' is not an outlier for negative words.  Its frequency is very close to the other top 10 negative words.
+
+```{r}
+bing_word_counts %>%
+  group_by(sentiment) %>%
+  slice_max(n, n = 10) %>% 
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(x = "Contribution to sentiment",
+       y = NULL)
+
+```
+
+* I'm adding a word to my stop word list that I do not want to appear in my word cloud.  It's worth noting that this word appears in the top 100 most frequently used non-stop words.
+
+```{r}
+custom_stop_words <- bind_rows(tibble(word = c("nigger"),  
+                                      lexicon = c("custom")), 
+                               stop_words)
+
+```
+
+2.5 Wordclouds
+
+* We can create a word cloud where we anti join our stop words to keep them from being included.  'Time' and 'Tom' are our most common words.
+
+
+```{r}
+library(wordcloud)
+
+tidy_books %>%
+  anti_join(stop_words) %>%
+  count(word) %>%
+  with(wordcloud(word, n, max.words = 100))
+
+```
+
+* We can sort our word cloud by sentiment and we get results consistent with our frequency bar plots.
+
+```{r}
+library(reshape2)
+
+tidy_books %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  acast(word ~ sentiment, value.var = "n", fill = 0) %>%
+  comparison.cloud(colors = c("gray20", "gray80"),
+                   max.words = 100)
+```
+
+2.6 Looking at units beyond just words
+
+* We have the ability to choose a token other than 'word'
+
+```{r}
+
+tom <- as.list(t1)
+
+tom_sentences <- tibble(text = tom$text) %>% 
+  unnest_tokens(sentence, text, token = "sentences")
+```
+
+```{r}
+tom_sentences$sentence[2]
+
+twain_chapters <- twain_books %>%
+  group_by(gutenberg_id) %>%
+  unnest_tokens(chapter, text, token = "regex", 
+                pattern = "Chapter|CHAPTER [\\dIVXLC]") %>%
+  ungroup()
+
+twain_chapters %>% 
+  group_by(gutenberg_id) %>% 
+  summarise(chapters = n())
+```
+
+* We can use the bing lexicon to determine what percentage of each work is negative.  Interestingly, each of the four chosen Twain works has a very similar percentage (5%).
+
+```{r}
+bingnegative <- get_sentiments("bing") %>% 
+  filter(sentiment == "negative")
+
+wordcounts <- tidy_books %>%
+  group_by(gutenberg_id, chapter) %>%
+  summarize(words = n())
+
+tidy_books %>%
+  semi_join(bingnegative) %>%
+  group_by(gutenberg_id, chapter) %>%
+  summarize(negativewords = n()) %>%
+  left_join(wordcounts, by = c("gutenberg_id", "chapter")) %>%
+  mutate(ratio = negativewords/words) %>%
+  filter(chapter != 0) %>%
+  slice_max(ratio, n = 1) %>% 
+  ungroup()
+```
+Now let's add an additional lexicon.  This is the 'DictionaryGI' lexicon which is a lexicon of opinionated words from the Harvard-IV dictionary as
+used in the General Inquirer software.  General Inquirer is software developed for textual content analysis.
+
+We can use this new lexicon to calculate the percentage of words that are negative just like we did with bing.  The DictionaryGI lexicon gave us rates similar to bing.
+
+
+```{r}
+GI_neg <- as.data.frame(DictionaryGI$negative)
+GI_pos <- as.data.frame(DictionaryGI$positive)
+
+
+wordcounts <- tidy_books %>%
+  group_by(gutenberg_id, chapter) %>%
+  summarize(words = n())
+
+
+tidy_books %>%
+  semi_join(GI_neg, by=c('word'= 'DictionaryGI$negative')) %>%
+  group_by(gutenberg_id, chapter) %>%
+  summarize(negativewords = n()) %>%
+  left_join(wordcounts, by = c("gutenberg_id", "chapter")) %>%
+  mutate(ratio = negativewords/words) %>%
+  filter(chapter != 0) %>%
+  slice_max(ratio, n = 1) %>% 
+  ungroup()
+```
+# Conclusion
+
+With R it is relatively easy to perform sentiment analysis that gives you the ability to get a flavor for different works and authors.  You can take a semi-structured corpus and transform/analyse it rapidly.
+
+There are some limitations to this approach, these lexicons were created based on modern works so these results can only be taken so far.  I think it makes sense to limit your analysis to modern works or only compare authors to the work of their contemporaries.
+
+I felt that each of the lexicon's performed equally well for my Mark Twain corpus.  There was no lexicon that gave me results that we not inline with the others.  For the example Austen text, the NRC lexicon gave results that were far more positive than bing or AFINN so I might not choose NRC for analysis of non-modern texts.
+
+
+__Citation:__
+
+1. Silge, Julia, et al. “ 2 Sentiment Analysis with Tidy Data .” _Text Mining with R: A Tidy Approach_, O'Reilly Media, Sebastopol, CA, 2017. 
+
