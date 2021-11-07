@@ -1,0 +1,110 @@
+---
+title: "DATA607 Recommender Assignment"
+author: "William Aiken"
+date: "11/7/2021"
+output:
+  tufte::tufte_html: default
+  tufte::tufte_handout:
+    citation_package: natbib
+    latex_engine: xelatex
+  tufte::tufte_book:
+    citation_package: natbib
+    latex_engine: xelatex
+link-citations: yes
+---
+
+```{r setup, include=FALSE}
+library(tufte)
+# invalidate cache when the tufte version changes
+knitr::opts_chunk$set(cache.extra = packageVersion('tufte'))
+options(htmltools.dir.version = FALSE)
+```
+# Introduction:
+
+My task was to analyze an existing recommender system that you find interesting.
+
+I analyzed the Tinder recommender system.  Tinder is a dating app that allows users to create an online profile and meet people that Tinder thinks you are compatible with.
+
+# Method:
+
+__I did the following:__
+
+1.    Perform a Scenario Design analysis as described below.  Consider whether it makes sense for your selected recommender system to perform scenario design twice, once for the organization (e.g. Amazon.com) and once for the organization's customers.
+
+__Who are your target users?__
+
+The target users of Tinder are people looking to meet other people to create new relationships.
+
+__What are their key goals?__
+
+People use Tinder for different reasons.  To quote Tinder's [website](https://tinder.com/about-tinder) under the heading "So, Why Choose A Dating App Like Tinder?", "It doesn’t matter if you want to find love, a date, or just have a casual chat, you still want to find an app that’s the right match for you."
+
+People who use Tinder are looking to create new romantic relationships of varying level of intimacy, commitment and duration.
+
+__How can you help them accomplish those goals?__
+
+Tinder helps people accomplish these goals by presenting users with potential matches that users can either show interest in by 'swiping right' or show disinterest by 'swiping left'.
+
+__Attempted to reverse engineer what you can about the site, from the site interface and any available information that you can find on the Internet or elsewhere.__
+    
+Interestingly the algorithm used by Tinder has changed over time.  This article by _The Verge_ explains what this evolution has looked like. [link](https://www.theverge.com/2019/3/15/18267772/tinder-elo-score-desirability-algorithm-how-works)
+
+In it's earliest form Tinder used a type of elo score to match users.  The [elo ranking](https://en.wikipedia.org/wiki/Elo_rating_system) was originally developed for chess and is fairly straightforward to understand.
+
+__Performance Rating = Sum Opponent's Ratings + 400 (Wins - Loses)/Games Played__
+
+Tinder used this algorithm to calculate people's 'desirability'.  When someone swiped right it was counts as a win and when someone wiped left it was treated as a loss.  The desirability of the person who swiped was treated as the Opponent Rating and the number of total swipes was treated as games played.
+
+Tinder came under criticism for this algorithm because it was argued that the 'desirability' score was just a measure of how physically attractive people rated you based on your photo.  As a result, when people were being shown profiles of similar ranking they were just being matched up with people with similar physical attractiveness.
+
+Tinder's new algorithm is not fully public but it is believed to be an implementation of the Gale-Shapley algorithm which is used by other dating sites and is famously used to match medical school graduates with hospitals for residencies.
+
+The goal of this algorithm is to return the most stable matches (matches where both parties are amendable to the match).  An unstable match would be a match where one party agreed with the match and the other did not.
+
+Here is an example of the implementation the algorithm taken from a [Princeton CS class](https://www.cs.princeton.edu/~wayne/kleinberg-tardos/pdf/01StableMatching.pdf):
+
+__GALE–SHAPLEY (preference lists for hospitals and students)__
+
+__INITIALIZE  M__ to empty matching.
+
+__WHILE__  (some hospital h is unmatched and hasn’t proposed to every student)
+
+s  ← first student on h’s list to whom h has not yet proposed.
+
+IF  (s is unmatched)
+
+Add h–s to matching M.
+
+__ELSE IF__  (s prefers h to current partner hʹ)
+
+Replace hʹ–s with h–s in matching M.
+
+__ELSE__
+
+s rejects h.
+
+__RETURN__ stable matching M
+
+# Conclusion
+
+__Specific recommendations about how to improve the site's recommendation capabilities going forward.__ 
+
+It appears that Tinder has moved from an algorithm that just matches people based on their relative hotness to one that matches people based on the interest of both parties or who are most likely to like each other.
+
+I would recommend you match based on a couple other parameters.  Frequency of engagement with the app should be accounted for.  If you are a high frequency app user you should only be matched with other high frequency app users.  If I'm on Tinder 10+ times a day why show me someone who is on only once a week?
+
+I would also want allow people to match based on desired use of the app.  People who are interested in casual partners should be matched with similar goals.  Why show me people who are looking to get married and have kids when I'm just trying to have a fun Friday night?
+
+# Citations
+
+“Find out Why Tinder® Is the World's Best Dating App.” Tinder, https://tinder.com/about-tinder. 
+
+Carman, Ashley. “Tinder Says It No Longer Uses a 'Desirability' Score to Rank People.” The Verge, The Verge, 15 Mar. 2019, https://www.theverge.com/2019/3/15/18267772/tinder-elo-score-desirability-algorithm-how-works. 
+
+“Elo Rating System.” Wikipedia, Wikimedia Foundation, 9 Oct. 2021, https://en.wikipedia.org/wiki/Elo_rating_system. 
+
+“Stable Matching.” Princeton University, The Trustees of Princeton University, https://www.cs.princeton.edu/~wayne/kleinberg-tardos/. 
+
+
+
+
