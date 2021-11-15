@@ -1,0 +1,302 @@
+---
+title: "DATA607 Project4 William Aiken"
+author: "William Aiken"
+date: "11/14/2021"
+output:
+  prettydoc::html_pretty:
+    theme: hpstr
+---
+
+Introduction:
+
+It can be useful to be able to classify new "test" documents using already classified "training" documents.  A common example is using a corpus of labeled spam and ham (non-spam) e-mails to predict whether or not a new document is spam. 
+
+In this project I used emails classified as 'spam' or 'ham' to build a email classifier.  There were several technical challenges to this assignment that I will adress as we move through the methods and results
+
+# Methods 
+1. Load the libraries that we will initially need to parse the data
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
+```
+```{r}
+library(rio)
+library(dplyr)
+library(stringi)
+library(stringr)
+library(prettydoc)
+library(readr)
+```
+#usethis::edit_r_environ()
+
+1.  We are pulling the data directly from the online archive and unzipping the data within R.  To do otherwise would be sub-optimal considering the number of files we need to unzip and load.
+
+* I used some of the functionality of the Rio package to create temporary directories to store my archive data
+
+* I used the download.file function to put my tarball in a temporary directory
+
+* I save out a list of file names that we will need to iterate over
+
+* I then untar my temporary file 'tf' but am storing it in my working directory which isn't ideal but I had trouble storning it back in my temporary directory
+
+
+```{r}
+# create a temporary directory
+td <- tempdir()
+
+# create a temporary file
+tf <- tempfile(tmpdir=td)
+
+# download file from internet into temporary location
+download.file("https://spamassassin.apache.org/old/publiccorpus/20021010_spam.tar.bz2", tf)
+
+# list zip archive
+file_names <- untar(tf, list=TRUE)
+file_names <- file_names[2:length(file_names)]
+
+untar(tf)
+```
+
+2. We use a for loop to load and attemp to parse each file.  Surprisingly with all the new packages out there read.csv does a pretty good job extracting our files
+
+* If a email has been misparsed by read.csv I catch it when I end up with named row names and don't parse them further
+
+* I then attempt to remove the email header through subsetting with a grep of common terms delimiting the transition from header to email body.  This list isn't exhaustive but removes alot of unwanted header text
+
+* I use str_replace to remove all letter characters, I know that the TM package has this functionality but their were some special characters that were throwing errors if I used TM functionality
+
+```{r, error= TRUE}
+all_spam <- data.frame()
+  
+# use when zip file has only one file
+for(j in 1:length(file_names)) {
+  try(data <- read.csv(file.path(getwd(), file_names[j]), encoding = "UTF-8"))
+  
+  #print(file_names[i])
+  
+  #don't try and parse emails where some of the text has been converted to row names
+  
+  try(if (!is.na(sum(as.numeric(rownames(data))))) {
+    #Remove the header
+    data <-
+      as.data.frame(data[grep('X-Spam-Level:|Precedence: bulk|> >|Message-Id:|Message-ID:',
+                              data[, 1]):nrow(data), 1])
+    colnames(data) <- c('data')
+    
+    all_spam <- rbind(all_spam, data)
+  })
+}
+
+
+# #Remove all numbers, punctuation, special characters 
+
+all_spam$data <-  str_replace_all(all_spam$data, "[^a-zA-Z ]", " ")
+
+# delete the files and directories
+unlink(td)
+unlink(tf)
+```
+
+
+3. Creating my corpus
+
+* I use the tm package to create my corpus and clean up the text
+
+* I strip the white space
+
+* Cast the text to lower case
+
+* Removing English stopwords
+
+* Stem my words and cast it to plain text
+
+* I create a meta tag for ham_spam
+
+```{r}
+library(tm)
+
+spam_corpus <- VCorpus(VectorSource(all_spam$data)) %>%
+  tm_map(stripWhitespace) %>%   
+  tm_map(tolower) %>% 
+  tm_map(removeWords, stopwords("en")) %>%
+  tm_map(stemDocument) %>%
+  tm_map(PlainTextDocument)
+
+meta(spam_corpus, tag = "ham_spam") <- "spam"
+```
+
+4.  Now for the ham
+
+* I do the same thing that I did for the spam
+
+```{r}
+# create a temporary directory
+td <- tempdir()
+
+# create a temporary file
+tf <- tempfile(tmpdir=td)
+
+# download file from internet into temporary location
+download.file("https://spamassassin.apache.org/old/publiccorpus/20021010_easy_ham.tar.bz2", tf)
+
+# list zip archive
+file_names <- untar(tf, list=TRUE)
+file_names <- file_names[2:length(file_names)]
+
+untar(tf)
+
+all_ham <- data.frame()
+
+# use when zip file has only one file
+for(i in 1:length(file_names)) {
+  try(data <- read.csv(file.path(getwd(), file_names[i]), encoding = "UTF-8"))
+  
+  #print(file_names[i])
+  
+  #don't try and parse emails where some of the text has been converted to row names
+  
+  if(!is.na(sum(as.numeric(rownames(data))))){
+    #Remove the header
+    data <- as.data.frame(data[grep('X-Spam-Level:|Precedence: bulk|> >|Message-Id:|Message-ID:', data[,1]):nrow(data),1])
+    colnames(data) <- c('data')
+    
+    all_ham <- rbind(all_ham, data)
+  }
+}
+
+# #Remove all numbers, punctuation, special characters 
+
+all_ham$data <-  str_replace_all(all_ham$data, "[^a-zA-Z ]", " ")
+
+# delete the files and directories
+unlink(td)
+unlink(tf)
+
+
+ham_corpus <- VCorpus(VectorSource(all_ham$data)) %>%
+  tm_map(stripWhitespace) %>%   
+  tm_map(tolower) %>%                     
+  tm_map(removeWords, stopwords("en")) %>%
+  tm_map(stemDocument) %>%
+  tm_map(PlainTextDocument)
+
+meta(ham_corpus, tag = "ham_spam") <- "ham"
+
+```
+
+5. Joining my corpuses and viewing word frequencies
+
+* I use the wordcloud package to view frequencies for the spam, ham and combined corpus
+
+```{r}
+joint_corpus <- c(ham_corpus, spam_corpus)
+# Scramble the order
+set.seed(1234)
+joint_corpus <- joint_corpus[sample(c(1:length(joint_corpus)))]
+
+library(wordcloud)
+#Look at word clouds of frequent terms
+temp <- wordcloud(joint_corpus, max.words = 100, random.order = FALSE, min.freq=500)
+wordcloud(spam_corpus, max.words = 100, random.order = FALSE, min.freq=500)
+wordcloud(ham_corpus, max.words = 100, random.order = FALSE, min.freq=500)
+
+dtm_ham_spam <- unlist(meta(joint_corpus, "ham_spam"))
+```
+
+6.  Creating Document Term Matrix
+
+* I create DTMs for all three of my corpus
+
+* I use the findFreqTerms to find the most common words for each matrix
+
+* It's worth noting that findFreqTerms() does something that I couldn't do by attempting to convert the DTMs to a matrix and doing a count on the columns.  I ran out fo memory
+
+* I also am not able to do randomForest on the full matrix do to memory issues
+
+* I find the most common words in the Ham corpus and subtract the common terms from the Spam corpus to give me a workable list of columns
+
+```{r}
+s_dtm <- spam_corpus %>% 
+  DocumentTermMatrix()
+
+h_dtm <- ham_corpus %>% 
+  DocumentTermMatrix()
+
+dtm <- joint_corpus %>% 
+  DocumentTermMatrix()
+
+d_temp <- findFreqTerms(dtm, lowfreq=500)
+s_temp <- findFreqTerms(s_dtm, lowfreq=500)
+h_temp <- findFreqTerms(h_dtm, lowfreq=500)
+f_temp <- setdiff(h_temp, s_temp)
+
+dtm_short <- dtm[,f_temp]
+```
+
+#7 Random Forest
+
+* Random Forest is a great non-parametric method for doing classification that give pretty good performance with minimal tuning
+
+* I have to attach my Spam/Ham column to my matrix as factors for RF to work
+
+* I do 70/30 split on my dataset
+
+* I pass my outcome and predictors to RF as a formula
+
+* I run a minimal number of trees on my model as a demonstration
+
+```{r}
+library(randomForest)
+
+set.seed(999)
+ind <- sample(2, nrow(dtm_short), replace = TRUE, prob = c(0.7, 0.3))
+train <- dtm_short[ind==1,]
+train <- as.matrix(train)
+ind2 <- sample(nrow(dtm), replace = FALSE)
+test <- as.matrix(dtm_short[ind==2,])
+
+
+is_spam <- factor(dtm_ham_spam[ind==1])
+is_spam_test <- factor(dtm_ham_spam[ind==2])
+
+colnames(train) <- make.names(colnames(train))
+colnames(test) <- make.names(colnames(test))
+
+
+df <- data.frame(Is_Spam = is_spam, train) 
+df_test <- data.frame(Is_Spam = is_spam_test, test) 
+
+
+f <- formula(paste0("Is_Spam ~ ", paste0(colnames(train), collapse = "+"))) 
+rf <- randomForest(f, df, ntree = 10) # Run the random forest model
+```
+
+8. Prediction with my test set
+
+* I now have a model that I can run my test set through
+```{r}
+RF_pred <- predict(rf, newdata=df_test, type="response")
+```
+
+# Results
+
+* I use the confusionMatrix function from the caret package
+
+* With the low number of trees that I ran Random Forest performs at the level of the prevalence with is a floor for performance
+```{r}
+library(caret)
+
+confusionMatrix(RF_pred, factor(df_test$Is_Spam),dnn=c("Prediction", "Reference"))
+```
+
+# Conclusion
+
+* Most of the effort in any data science task in the data gathering and processing.  Getting the data to parse directly from the web turned out to be surprisingly tricky.
+
+* There is additional cleaning and parsing of the data that could have improved my model building.  I could have extracted more information from the header that I just discarded.
+
+* Originally I had saved the header and flagged it in the meta data.  I trimmed that part of the analysis when I realized just how long it would take to run models on the full data set
+
+* I was also surprised when my laptop was unable to opperate on the full matrix.  This is something that I could have done with AWS if this was a genuine project.
+
+* This was a lackluster performance by Random Forest but I ran an almost criminal number of trees and it still gave me performance on par with the prevalence which I consider a win.
