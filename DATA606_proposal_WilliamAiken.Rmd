@@ -1,0 +1,109 @@
+---
+title: "DATA 606 Data Project Proposal"
+author: "William Aiken"
+output:
+  pdf_document: default
+---
+
+
+### Data Preparation
+
+```{r setup, echo=TRUE, results='hide', warning=FALSE, message=FALSE}
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(kableExtra)
+library(gtsummary)
+# load data
+
+Income <- readr::read_delim("https://raw.githubusercontent.com/catfoodlover/Data607/main/Income.csv", delim = ';', show_col_types = FALSE)
+Obese <- readr::read_delim("https://raw.githubusercontent.com/catfoodlover/Data607/main/Obese.csv", delim = ';', show_col_types = FALSE)
+Diagnosed <- readr::read_delim("https://raw.githubusercontent.com/catfoodlover/Data607/main/Diagnosed.csv", delim = ';', show_col_types = FALSE)
+
+Diagnosed <- rename(Diagnosed, County = "County Name")
+Diagnosed <- rename(Diagnosed, diabetic = "Percent/Rate")
+Income <- rename(Income, Year = "Tax Year")
+
+Income09 <- filter(Income, Year == '2009')
+Income09 <- rename(Income09, income = "Average NY AGI of All Returns")
+
+Obese <- rename(Obese, obesity = "Percentage/Rate")
+
+#fix missing decimals
+Diagnosed <- Diagnosed %>% mutate(diabetic = diabetic/10)
+
+
+```
+
+
+### Research question 
+
+**You should phrase your research question in a way that matches up with the scope of inference your dataset allows for.**
+Is there a correlation between obesity rates, average income and diabetic rates at the county level in New York State?
+
+
+### Cases 
+
+**What are the cases, and how many are there?**
+These cases are the New York State reported county level obesity, income and diabetic rates.
+
+
+### Data collection 
+
+**Describe the method of data collection.**
+The data is public health data that is collected by the state and income data collected by the state for tax purposes.
+
+
+
+### Type of study 
+
+**What type of study is this (observational/experiment)?**
+This is an observational study.
+
+
+### Data Source 
+
+**If you collected the data, state self-collected. If not, provide a citation/link.**
+This data comes from the NY.GOV site as part of their open data sets
+[Obesity and Diabetes](https://health.data.ny.gov/Health/Community-Health-Obesity-and-Diabetes-Related-Indi/tchg-ruva)
+[Income](https://data.ny.gov/Government-Finance/Average-Income-and-Tax-Liability-of-Full-Year-Resi/2w9v-ejxd)
+
+
+### Dependent Variable
+
+**What is the response variable? Is it quantitative or qualitative?**
+The repsonse variable is diabetic rate which is quantitative.
+
+
+
+### Independent Variable
+
+**You should have two independent variables, one quantitative and one qualitative.**
+My two independent variables are average income which is quantitative and obesity rate which is also quantitative.
+
+
+### Relevant summary statistics 
+
+**Provide summary statistics for each the variables. Also include appropriate visualizations related to your research question (e.g. scatter plot, boxplots, etc). This step requires the use of R, hence a code chunk is provided below. Insert more code chunks as needed.**
+
+```{r}
+
+
+ggplot(data=Diagnosed, aes(diabetic)) + geom_histogram(bins = 50)
+
+
+ggplot(data=Income09, aes(income)) + geom_histogram(bins = 50)
+
+
+ggplot(data=Obese, aes(obesity)) + geom_histogram(bins = 50)
+
+
+Diagnosed %>% select(diabetic) %>% tbl_summary(statistic = list(all_continuous() ~ "{mean} ({sd}), {min}, {max}"))
+
+Income09 %>% select(income) %>% tbl_summary(statistic = list(all_continuous() ~ "{mean} ({sd}), {min}, {max}"))
+
+Obese %>% select(obesity) %>% tbl_summary(statistic = list(all_continuous() ~ "{mean} ({sd}), {min}, {max}"))
+
+
+```
+
