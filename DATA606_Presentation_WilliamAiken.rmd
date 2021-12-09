@@ -1,0 +1,241 @@
+---
+title: "DATA 606 Data Project Presentation"
+author: "William Aiken"
+output:
+  slidy_presentation: default
+  ioslides_presentation: default
+  beamer_presentation: default
+---
+
+
+```{r echo=FALSE}
+# load data
+
+```
+# Abstract
+
+Diabetes is a disease with a high health cost to the individual and high monetary cost to our communities.  New York state tracks diabetic rates at the county level along with other health and economic data.  I leveraged this publicly available data to explore the heterogeneity in diabetic rates in New York state.  I wanted to know if there was a correlation between diabetes, income, and obesity at the county level.  The individual variables were visualized, and the income data was log transformed to help resolve the skewness of the distribution.  Linear regression was used explore the relationship between diabetes (dependent variable) and income and obesity (independent variables).  The R-squared was found to be 0.355, showing a correlation between the outcome and predictive variables.  Both coefficients were found to significantly different from zero.  The coefficients for obesity and the log transformed income were 0.12 and -1.9 respectively.  The incidence of diabetes increases with the increase of the obesity rate for the county and decreases with the increase in average income for a county.  Further exploration of the relationships could lead to better interventions to prevent diabetes.  In further analysis, the obesity rates and average incomes should be weighted by county population.
+
+
+# Part 1 - Introduction
+
+I was interested in exploring the hetrogeneity of diabetic rates in New York State and how it is related to income and obesity rates.  New York is an intersting state for this analysis because there are so many different geographic regions within the state.
+
+Research Question:  Are the diabetic rates in New York state correlated with the obesity rates and average income at the county level?
+
+
+# Part 2 - Data
+This data comes from the NY.GOV site as part of their open data sets
+
+* The Obesity and Diabetes data comes from the New York State Department of Health disease registries.  These registries are based on multiple sources including hospital registries in a given geographic area.  People who live outside a given area but receive treatment within a geographic region are not counted in these population based registries.
+
+[Obesity and Diabetes](https://health.data.ny.gov/Health/Community-Health-Obesity-and-Diabetes-Related-Indi/tchg-ruva)
+
+* The income data is collected by the New York State Department of Taxation and Finance. This data comes the New York State personal income tax returns that were filed in a timely fashion.  This data is for full-time New York State residents.
+
+[Income](https://data.ny.gov/Government-Finance/Average-Income-and-Tax-Liability-of-Full-Year-Resi/2w9v-ejxd)
+
+```{r include=FALSE}
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE, echo=FALSE)
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(kableExtra)
+library(gtsummary)
+library(choroplethr)
+library(choroplethrMaps)
+library(performance)
+```
+
+
+
+```{r}
+Income <- readr::read_delim("https://raw.githubusercontent.com/catfoodlover/Data607/main/Income.csv", delim = ';', show_col_types = FALSE)
+Obese <- readr::read_delim("https://raw.githubusercontent.com/catfoodlover/Data607/main/Obese.csv", delim = ';', show_col_types = FALSE)
+Diagnosed <- readr::read_delim("https://raw.githubusercontent.com/catfoodlover/Data607/main/Diagnosed.csv", delim = ';', show_col_types = FALSE)
+
+data("county.regions")
+Diagnosed <- rename(Diagnosed, County = "County Name")
+Income <- rename(Income, County = "Place of Residence")
+Income <- rename(Income, Year = "Tax Year")
+Obese <- rename(Obese, County = "County Name")
+Income$County <- as.character(Income$County)
+
+
+Income <-mutate(Income, County=ifelse(County=="New York City - Bronx", "Bronx", County))
+Income <-mutate(Income, County=ifelse(County=="New York City - Kings", "Kings", County))
+Income <-mutate(Income, County=ifelse(County=="New York City - Manhattan", "New York", County))
+Income <-mutate(Income, County=ifelse(County=="New York City - Queens", "Queens", County))
+Income <-mutate(Income, County=ifelse(County=="New York City - Richmond", "Richmond", County))
+
+
+Income09 <- filter(Income, Year == 2009)
+Income09 <- mutate(Income09, County = ifelse(County == "new york city", "new york", County))
+
+
+Obese$County <- tolower(Obese$County)
+Income09$County <- tolower(Income09$County)
+Diagnosed$County <- tolower(Diagnosed$County)
+
+
+DiaDiagnosed <- filter(Diagnosed, Diagnosed$"Health Topic" %in% "Cirrhosis/Diabetes Indicators")
+
+
+DiaDiagnosed <- rename(DiaDiagnosed, value = "Percent/Rate")
+Income09 <- rename(Income09, value = "Average NY AGI of All Returns")
+
+Obese <- rename(Obese, value = "Percentage/Rate")
+
+Temp <- filter(county.regions, state.name %in% "new york")
+
+#Income09 <- Income09 %>% mutate(County = as.character(County))
+
+Temp_Obese <- left_join(Temp, Obese, by = c("county.name" = "County"))
+Temp_Income <- left_join(Temp, Income09, by = c("county.name" = "County"))
+Temp_Diab <- left_join(Temp, DiaDiagnosed, by = c("county.name" = "County"))
+
+
+#fix missing decimals
+Temp_Diab <- Temp_Diab %>% mutate(value = ifelse(value > 50, value/10, value))
+Temp_Obese <- Temp_Obese %>% mutate(value = ifelse(value > 100, value/10, value))
+```
+
+# Part 3a - Exploratory data analysis
+
+* Looking at summary statistics of our data.
+
+```{r}
+
+Temp_Diab %>% select(diabetic = value) %>% tbl_summary(statistic = list(all_continuous() ~ c("{mean} ({sd})", "{min}, {max}")), type = all_continuous() ~ "continuous2")
+
+```
+
+
+```{r}
+ Temp_Income %>% select(income = value) %>% tbl_summary(statistic = list(all_continuous() ~ c("{mean} ({sd})", "{min}, {max}")), type = all_continuous() ~ "continuous2")
+```
+
+
+```{r}
+Temp_Obese %>% select(obesity = value) %>% tbl_summary(statistic = list(all_continuous() ~ c("{mean} ({sd})", "{min}, {max}")), type = all_continuous() ~ "continuous2")
+```
+
+# Part 3b - Histograms of the data
+
+* Diabetic Rates
+
+```{r}
+ggplot(data=Temp_Diab, aes(value)) + geom_histogram(bins = 25, color="blue", fill = "yellow") + labs(title = "Diabetic Rates in New York Counties in 2009") + xlab("Diabetic Rate by County") + ylab("Count")
+```
+
+# Part 3c - Obesity Rates
+
+```{r}
+ggplot(data=Temp_Obese, aes(value)) + geom_histogram(bins = 25, color="blue", fill = "pink") + labs(title = "Obesity Rates in New York Counties in 2009") + xlab("Obesity Rate by County") + ylab("Count")
+```
+
+# Part 3d - Average Income
+
+```{r}
+ggplot(data=Temp_Income, aes(value)) + geom_histogram(bins = 25, color="blue", fill = "green") + labs(title = "Average Income in New York Counties in 2009") + xlab("Mean Taxable Income by County") + ylab("Count")
+
+```
+
+# Part 3e - Addressing the skewness 
+
+```{r}
+Temp_Income <- Temp_Income %>% mutate(value = log(value))
+
+
+ggplot(data=Temp_Income, aes(value)) + geom_histogram(bins = 25, color="blue", fill = "green") + labs(title = "Log Transformed Average Income in New York Counties in 2009") + xlab("NL of Mean Taxable Income by County") + ylab("Count")
+
+```
+
+# Part 3f - Exploring geographic relationships
+
+* Obesity rate by county
+
+```{r}
+county_choropleth(Temp_Obese,
+                  title      = "2009 New York State Obesity Rates",
+                  legend     = "% Population Obese",
+                  num_colors = 9,
+                  state_zoom = c("new york")) + scale_fill_brewer(palette="RdPu")
+```
+
+#  Part 3g - Income by county
+
+```{r}
+county_choropleth(Temp_Income,
+                  title      = "2009 Log of Average Incomes by County",
+                  legend     = "Log Transformed Average Income",
+                  num_colors = 9,
+                  state_zoom = c("new york")) + scale_fill_brewer(palette="Greens")
+```
+
+#  Part 3h - Diabetic rate by county
+
+```{r}
+county_choropleth(Temp_Diab,
+                  title      = "Diabetic Rates per County",
+                  legend     = "% of population with Diabetes",
+                  num_colors = 9,
+                  state_zoom = c("new york")) + scale_fill_brewer(palette="YlOrRd")
+```
+
+
+# Part 4a - Inference
+
+* Does linear regression look appropriate?
+
+```{r}
+full_data <- inner_join(Temp_Diab %>% select(region, diag = value), Temp_Obese %>% select(region, obese = value))
+full_data <- inner_join(full_data, Temp_Income %>% select(region, income = value))
+
+
+
+ggplot(full_data, aes(y=diag, x=obese)) + geom_point() + geom_smooth(method = "glm", se=FALSE) + labs(title = "Income vs Diabetic Diagnosis in NY State") + xlab("Obesity Rate by County") + ylab("Diabetic Rate by County")
+
+```
+
+# Part 4b - Slight heteroscedasticity for Income
+
+```{r}
+ggplot(full_data, aes(y=diag, x=income)) + geom_point() + geom_smooth(method = "glm", se=FALSE) + labs(title = "Income vs Diabetic Diagnosis in NY State") + xlab("NL of Mean Taxable Income by County") + ylab("Diabetic Rate by County")
+```
+
+# Part 4c - Linear Model
+
+```{r}
+
+
+model = lm(diag ~ obese + income, data = full_data)
+
+
+#summary(model)
+tbl_regression(model) %>%
+  add_glance_table(include = c(nobs, r.squared, adj.r.squared, sigma))
+```
+
+# Part 4d - Check our Model
+
+```{r}
+check_model(model)
+```
+
+
+# Part 5 - Conclusion
+
+This analysis is important because type 2 diabetes is a debilitating desease that is largely preventable.  To understand what other factors are related to its incidence may lead to better prevention methods.
+
+We found that there is a correlation between diabetes and income and obesity.  There are some limitations to the interpretability of these results.  We used measurements captured at the county level, the populations within each county vary wildly.  We can't say what the relationship is at the population level of all people who live in New York state because these measurements are unweighted.
+
+
+### References
+
+New York State Department of Health. “Community Health Obesity and Diabetes Related Indicators: 2008 - 2012: State of New York.” Community Health Obesity and Diabetes Related Indicators: 2008 - 2012 | State of New York, 1 July 2016, https://health.data.ny.gov/Health/Community-Health-Obesity-and-Diabetes-Related-Indi/tchg-ruva. 
+
+New York State Department of Taxation and Finance. “Average Income and Tax Liability of Full-Year Residents by County - Table 5: State of New York.” Average Income and Tax Liability of Full-Year Residents by County - Table 5 | State of New York, 6 Feb. 2017, https://data.ny.gov/Government-Finance/Average-Income-and-Tax-Liability-of-Full-Year-Resi/2w9v-ejxd. 
+
+
+
